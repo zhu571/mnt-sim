@@ -1,0 +1,35 @@
+# Configuration for 238U + 238U MNT simulation
+# Following Wang et al., NIM B 463 (2020) - LENSHIAF spectrometer
+reaction:
+  projectile: "U"         # Projectile element
+  projectile_A: 238       # Projectile mass number
+  target: "U"             # Target element
+  target_A: 238           # Target mass number
+  E_lab: 7.0              # MeV/u (beam energy per nucleon)
+
+# Cross-section calculation
+cross_section:
+  model: "dns"           # Model: dns, grazing, empirical
+  delta_Z: [-6, 6]       # Range of proton transfer (wider for U+U)
+  delta_N: [-10, 10]     # Range of neutron transfer (wider for U+U)
+  n_steps: 500           # DNS time steps (more for heavier system)
+
+# Gas cell parameters (from paper: 90 K, 80 mbar He)
+gas_cell:
+  gas: "He"              # Stopping gas
+  pressure_mbar: 80      # Gas pressure (from paper)
+  length_mm: 1600        # Cell length 1.6 m (from paper)
+  diameter_mm: 1600      # Cell diameter 1.6 m (from paper)
+  temperature_K: 90      # Cryogenic temperature (from paper)
+
+# MC transport settings
+transport:
+  n_particles: 10000     # MC particles per channel
+  step_size_mm: 0.5      # Transport step size
+  sigma_theta_deg: 3.0   # Angular spread from reaction
+
+# Output settings
+output:
+  plots: true
+  save_data: true
+  output_dir: "./output/uu/"

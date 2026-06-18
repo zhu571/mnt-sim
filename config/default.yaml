@@ -1,0 +1,35 @@
+# Configuration for MNT simulation pipeline
+# Reaction system
+reaction:
+  projectile: "Xe"       # Projectile element
+  projectile_A: 136       # Projectile mass number
+  target: "Pb"            # Target element
+  target_A: 208           # Target mass number
+  E_lab: 8.0              # MeV/u (beam energy per nucleon)
+
+# Cross-section calculation
+cross_section:
+  model: "dns"           # Model: dns, grazing, empirical
+  delta_Z: [-4, 4]       # Range of proton transfer
+  delta_N: [-6, 6]       # Range of neutron transfer
+  n_steps: 200           # DNS time steps
+
+# Gas cell parameters
+gas_cell:
+  gas: "He"              # Stopping gas
+  pressure_mbar: 50      # Gas pressure
+  length_mm: 200         # Cell length
+  diameter_mm: 40        # Cell inner diameter
+  temperature_K: 293     # Room temperature
+
+# MC transport settings
+transport:
+  n_particles: 10000     # MC particles per channel
+  step_size_mm: 0.5      # Transport step size
+  sigma_theta_deg: 3.0   # Angular spread from reaction
+
+# Output settings
+output:
+  plots: true
+  save_data: true
+  output_dir: "./output/"
