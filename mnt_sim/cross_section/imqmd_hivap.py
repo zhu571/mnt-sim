@@ -16,6 +16,10 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from mnt_sim.data import element_to_z, typical_mass_number
+
+__all__ = ["ImQMD_HIVAP_Model", "MNTResult"]
+
 
 @dataclass
 class MNTResult:
@@ -68,25 +72,12 @@ class ImQMD_HIVAP_Model:
         self.v_cm = np.sqrt(2 * self.E_lab_total / (self.Ap + self.At))
 
     def _Z(self, s):
-        el = {'H':1,'He':2,'Li':3,'Be':4,'B':5,'C':6,'N':7,'O':8,'F':9,'Ne':10,
-              'Na':11,'Mg':12,'Al':13,'Si':14,'P':15,'S':16,'Cl':17,'Ar':18,
-              'K':19,'Ca':20,'Sc':21,'Ti':22,'V':23,'Cr':24,'Mn':25,'Fe':26,
-              'Co':27,'Ni':28,'Cu':29,'Zn':30,'Ga':31,'Ge':32,'As':33,'Se':34,
-              'Br':35,'Kr':36,'Rb':37,'Sr':38,'Y':39,'Zr':40,'Nb':41,'Mo':42,
-              'Tc':43,'Ru':44,'Rh':45,'Pd':46,'Ag':47,'Cd':48,'In':49,'Sn':50,
-              'Sb':51,'Te':52,'I':53,'Xe':54,'Cs':55,'Ba':56,'La':57,'Ce':58,
-              'Pr':59,'Nd':60,'Pm':61,'Sm':62,'Eu':63,'Gd':64,'Tb':65,'Dy':66,
-              'Ho':67,'Er':68,'Tm':69,'Yb':70,'Lu':71,'Hf':72,'Ta':73,'W':74,
-              'Re':75,'Os':76,'Ir':77,'Pt':78,'Au':79,'Hg':80,'Tl':81,'Pb':82,
-              'Bi':83,'Po':84,'At':85,'Rn':86,'Fr':87,'Ra':88,'Ac':89,'Th':90,
-              'Pa':91,'U':92,'Np':93,'Pu':94,'Am':95,'Cm':96,'Bk':97,'Cf':98}
-        return el.get(s.capitalize(), 0)
+        """Convert element symbol to atomic number."""
+        return element_to_z(s)
 
     def _A(self, s):
-        m = {'Ca':40,'Ni':58,'Xe':136,'Pt':198,'Pb':208,'U':238,
-             'Kr':84,'Ge':74,'Sn':124,'Ba':138,'Ra':226,
-             'Th':232,'Cm':248,'Ar':40,'Os':200}
-        return m.get(s.capitalize(), 0)
+        """Return typical mass number for an element."""
+        return typical_mass_number(s)
 
     def _transmission(self, l: int, hw: float = 4.0) -> float:
         """Hill-Wheeler transmission."""
@@ -234,9 +225,13 @@ class ImQMD_HIVAP_Model:
         Zv = np.arange(dz_range[0], dz_range[1] + 1)
         Nv = np.arange(dn_range[0], dn_range[1] + 1)
         nZ, nN = len(Zv), len(Nv)
+        if nZ == 0 or nN == 0:
+            raise ValueError("transfer ranges must not be empty")
 
         theta_lab_grid = np.linspace(0, 90, n_theta)
         E_grid = np.linspace(0, 1800, nE)
+        if n_theta < 2 or nE < 2:
+            raise ValueError("n_theta and nE must be at least 2")
         dE = E_grid[1] - E_grid[0]
         dTh = theta_lab_grid[1] - theta_lab_grid[0]
         d2 = np.zeros((n_theta, nE))

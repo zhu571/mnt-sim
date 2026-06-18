@@ -10,9 +10,12 @@ Physics reference:
 """
 
 import numpy as np
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Tuple
-from scipy import integrate, special
+from dataclasses import dataclass
+from typing import Tuple
+
+from mnt_sim.data import element_to_z, typical_mass_number
+
+__all__ = ["DNSModel", "DNSResult"]
 
 
 @dataclass
@@ -74,30 +77,11 @@ class DNSModel:
 
     def _element_to_Z(self, symbol: str) -> int:
         """Convert element symbol to atomic number."""
-        elements = {
-            'H':1,'He':2,'Li':3,'Be':4,'B':5,'C':6,'N':7,'O':8,'F':9,'Ne':10,
-            'Na':11,'Mg':12,'Al':13,'Si':14,'P':15,'S':16,'Cl':17,'Ar':18,
-            'K':19,'Ca':20,'Sc':21,'Ti':22,'V':23,'Cr':24,'Mn':25,'Fe':26,
-            'Co':27,'Ni':28,'Cu':29,'Zn':30,'Ga':31,'Ge':32,'As':33,'Se':34,
-            'Br':35,'Kr':36,'Rb':37,'Sr':38,'Y':39,'Zr':40,'Nb':41,'Mo':42,
-            'Tc':43,'Ru':44,'Rh':45,'Pd':46,'Ag':47,'Cd':48,'In':49,'Sn':50,
-            'Sb':51,'Te':52,'I':53,'Xe':54,'Cs':55,'Ba':56,'La':57,'Ce':58,
-            'Pr':59,'Nd':60,'Pm':61,'Sm':62,'Eu':63,'Gd':64,'Tb':65,'Dy':66,
-            'Ho':67,'Er':68,'Tm':69,'Yb':70,'Lu':71,'Hf':72,'Ta':73,'W':74,
-            'Re':75,'Os':76,'Ir':77,'Pt':78,'Au':79,'Hg':80,'Tl':81,'Pb':82,
-            'Bi':83,'Po':84,'At':85,'Rn':86,'Fr':87,'Ra':88,'Ac':89,'Th':90,
-            'Pa':91,'U':92,'Np':93,'Pu':94,'Am':95,'Cm':96,'Bk':97,'Cf':98,
-        }
-        return elements.get(symbol.capitalize(), 0)
+        return element_to_z(symbol)
 
     def _element_to_A(self, symbol: str) -> int:
         """Get typical mass number for an element (most stable isotope)."""
-        masses = {
-            'Ca':40,'Ni':58,'Xe':136,'Pb':208,'U':238,
-            'Kr':84,'Ge':74,'Sn':124,'Ba':138,'Ra':226,
-            'Th':232,'Cm':248,'Ar':40,'Kr':86,
-        }
-        return masses.get(symbol.capitalize(), 0)
+        return typical_mass_number(symbol)
 
     def _compute_E_cm(self) -> float:
         """Compute center-of-mass energy from lab energy [MeV]."""
@@ -212,6 +196,12 @@ class DNSModel:
 
         nZ = Z_max - Z_min + 1
         nN = N_max - N_min + 1
+        if nZ <= 0 or nN <= 0:
+            raise ValueError("delta ranges must be increasing")
+        if not (Z_min <= 0 <= Z_max and N_min <= 0 <= N_max):
+            raise ValueError("delta ranges must include the initial channel (0, 0)")
+        if n_steps <= 0:
+            raise ValueError("n_steps must be positive")
 
         Z_vals = np.arange(Z_min, Z_max + 1)
         N_vals = np.arange(N_min, N_max + 1)
@@ -321,7 +311,9 @@ class DNSModel:
         # Sigma-weighted angular distribution
         dist = np.exp(-(theta_lab - np.degrees(theta_graz))**2
                       / (2 * sigma_theta**2))
-        dist /= np.sum(dist)
+        dist_sum = np.sum(dist)
+        if dist_sum > 0:
+            dist /= dist_sum
 
         # Energy distribution: Gaussian with width from Q-value smearing
         nZ, nN = result.Z.shape[0], result.N.shape[0]
@@ -345,6 +337,8 @@ class DNSModel:
                                            * np.exp(-(E_vals - result.E_cm)**2
                                                     / (2 * sigma_E**2))
                                            / (np.sqrt(2*np.pi) * sigma_E))
-                    d2sigma[i, j, k, :] /= np.sum(d2sigma[i, j, k, :])
+                    norm = np.sum(d2sigma[i, j, k, :])
+                    if norm > 0:
+                        d2sigma[i, j, k, :] /= norm
 
         return d2sigma

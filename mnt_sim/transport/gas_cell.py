@@ -12,9 +12,11 @@ Reference gas cell parameters:
 """
 
 import numpy as np
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from dataclasses import dataclass
+from typing import Optional
 from enum import Enum
+
+__all__ = ["CellGeometry", "Foil", "GasCell", "WindowMaterial"]
 
 
 class CellGeometry(Enum):
@@ -38,6 +40,12 @@ class Foil:
     material: WindowMaterial
     thickness_um: float  # μm
     diameter_mm: float   # mm
+
+    def __post_init__(self) -> None:
+        if self.thickness_um < 0:
+            raise ValueError("foil thickness must be non-negative")
+        if self.diameter_mm <= 0:
+            raise ValueError("foil diameter must be positive")
 
     @property
     def thickness_mgcm2(self) -> float:
@@ -87,6 +95,16 @@ class GasCell:
     geometry: CellGeometry = CellGeometry.CYLINDRICAL
     taper_angle_deg: float = 0.0
 
+    def __post_init__(self) -> None:
+        if self.pressure_mbar < 0:
+            raise ValueError("gas pressure must be non-negative")
+        if self.length_mm <= 0:
+            raise ValueError("cell length must be positive")
+        if self.diameter_mm <= 0:
+            raise ValueError("cell diameter must be positive")
+        if self.temperature_K <= 0:
+            raise ValueError("gas temperature must be positive")
+
     @property
     def effective_length_mm(self) -> float:
         """Effective stopping length [mm]."""
@@ -102,12 +120,11 @@ class GasCell:
     def gas_density(self) -> float:
         """Gas density [g/cm^3] at given pressure and temperature."""
         from .stopping import get_gas_props
-        # Adjust density for temperature
+
+        # get_gas_props already scales STP density by pressure.
         props = get_gas_props(self.gas, self.pressure_mbar)
         rho = props['density']
-        # Ideal gas: ρ ∝ P/T
-        rho_adjusted = rho * (self.pressure_mbar / 1013.25) * (273.15 / self.temperature_K)
-        return rho_adjusted
+        return rho * (273.15 / self.temperature_K)
 
     def pressure_in_atm(self) -> float:
         """Convert pressure to atm."""

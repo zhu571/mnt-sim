@@ -14,8 +14,9 @@ References:
 """
 
 import numpy as np
-from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Tuple
+
+__all__ = ["GAS_PROPERTIES", "StoppingPower", "get_gas_props"]
 
 
 # Gas properties: (Z, A, density [g/cm^3] at STP)
@@ -43,7 +44,13 @@ def get_gas_props(gas_name: str, pressure_mbar: float = None) -> dict:
     -------
     dict with Z, A, density [g/cm^3], number_density [cm^-3]
     """
-    Z, A, rho_stp = GAS_PROPERTIES.get(gas_name, (2, 4.0026, 1.786e-4))
+    if pressure_mbar is not None and pressure_mbar < 0:
+        raise ValueError("pressure_mbar must be non-negative")
+
+    try:
+        Z, A, rho_stp = GAS_PROPERTIES[gas_name]
+    except KeyError as exc:
+        raise ValueError(f"unknown gas species: {gas_name!r}") from exc
 
     if pressure_mbar is not None:
         # P V = n R T => density scales with pressure
@@ -75,6 +82,10 @@ class StoppingPower:
 
     def __init__(self, ion_Z: int, ion_A: int,
                  gas: str = 'He', pressure_mbar: float = 50):
+        if ion_Z <= 0:
+            raise ValueError("ion_Z must be positive")
+        if ion_A <= 0:
+            raise ValueError("ion_A must be positive")
         self.ion_Z = ion_Z
         self.ion_A = ion_A
         self.gas = gas
@@ -113,7 +124,7 @@ class StoppingPower:
         if E_MeV < 0.001:
             return 0.0
 
-        beta, gamma = self._beta_gamma(E_MeV / self.ion_A)  # per nucleon
+        beta, gamma = self._beta_gamma(E_MeV)
 
         if beta < 0.01:
             return self._lindhard_scharff(E_MeV)
@@ -135,10 +146,11 @@ class StoppingPower:
 
         # Shell correction (simplified)
         C = 0.0
+        I_exc_MeV = self.I_exc * 1e-6
 
         dE_dx = (K * z**2 * Z_gas / (A_gas * beta**2)
                  * (0.5 * np.log(2 * self.m_e * beta**2 * gamma**2 * W_max
-                                 / self.I_exc**2)
+                                 / I_exc_MeV**2)
                     - beta**2 - delta/2 - C/Z_gas))
 
         # Convert from MeV/(g/cm^2) to MeV/(mg/cm^2)
@@ -231,8 +243,7 @@ class StoppingPower:
             dx = dE / dEdx  # mg/cm^2
             dist += dx
             E -= dE
-            trajectory[0, i] = dist / (self.gas_density * 1000)  # cm -> convert density g/cm^3 to mg/cm^3? 
-            # Actually: dE/dx is in MeV/(mg/cm^2). 
+            # Actually: dE/dx is in MeV/(mg/cm^2).
             # dx in mg/cm^2. To get cm: dx / (density_cm3 * 1000) = dx_mgcm2 / (rho_gcm3 * 1000 mg/g * 1 cm)
             # density is g/cm^3, so: cm = (mg/cm^2) / (rho * 1000)
             trajectory[0, i] = dx / (self.gas_density * 1000)
@@ -267,7 +278,7 @@ class StoppingPower:
         if dx_mgcm2 <= 0 or E_MeV <= 0:
             return 0.0
 
-        beta, gamma = self._beta_gamma(E_MeV / self.ion_A)
+        beta, gamma = self._beta_gamma(E_MeV)
 
         # Bohr straggling
         omega2_Bohr = (4 * np.pi * (1.44e-13*1e6)**2  # (e^2)^2 in MeV^2·cm
@@ -277,7 +288,8 @@ class StoppingPower:
 
         # Tschalär correction for lower energies
         if beta < 0.1:
-            L = np.log(2 * self.m_e * beta**2 / self.I_exc * 1e6)
+            I_exc_MeV = self.I_exc * 1e-6
+            L = np.log(2 * self.m_e * beta**2 / I_exc_MeV)
             omega2 = omega2_Bohr * max(0.5, L / 10)
         else:
             omega2 = omega2_Bohr

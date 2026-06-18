@@ -11,3 +11,5 @@ Affiliation: Shanghai Institute of Applied Physics, CAS
 """
 
 __version__ = "0.1.0"
+
+__all__ = ["__version__"]

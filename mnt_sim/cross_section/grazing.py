@@ -10,7 +10,9 @@ Uses classical trajectories + quantum tunneling for nucleon exchange.
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
+
+__all__ = ["GrazingModel", "GrazingResult"]
 
 
 @dataclass
@@ -72,6 +74,10 @@ class GrazingModel:
         Z_vals = np.arange(delta_Z_range[0], delta_Z_range[1] + 1)
         N_vals = np.arange(delta_N_range[0], delta_N_range[1] + 1)
         nZ, nN = len(Z_vals), len(N_vals)
+        if nZ == 0 or nN == 0:
+            raise ValueError("transfer ranges must not be empty")
+        if n_l <= 0:
+            raise ValueError("n_l must be positive")
 
         sigma_ch = np.zeros((nZ, nN))
 

@@ -7,7 +7,11 @@ import os
 import logging
 from dataclasses import dataclass
 
+from mnt_sim.data import element_to_z
+
 logger = logging.getLogger(__name__)
+
+__all__ = ["ImQMD_MC_Model", "MNTResult"]
 
 
 @dataclass
@@ -28,22 +32,8 @@ class ImQMD_MC_Model:
 
     def __init__(self, projectile="U", target="U", E_lab=7.0,
                  Ap=238, At=238):
-        self._Z_map = {
-            'H':1,'He':2,'Li':3,'Be':4,'B':5,'C':6,'N':7,'O':8,'F':9,'Ne':10,
-            'Na':11,'Mg':12,'Al':13,'Si':14,'P':15,'S':16,'Cl':17,'Ar':18,
-            'K':19,'Ca':20,'Sc':21,'Ti':22,'V':23,'Cr':24,'Mn':25,'Fe':26,
-            'Co':27,'Ni':28,'Cu':29,'Zn':30,'Ga':31,'Ge':32,'As':33,'Se':34,
-            'Br':35,'Kr':36,'Rb':37,'Sr':38,'Y':39,'Zr':40,'Nb':41,'Mo':42,
-            'Tc':43,'Ru':44,'Rh':45,'Pd':46,'Ag':47,'Cd':48,'In':49,'Sn':50,
-            'Sb':51,'Te':52,'I':53,'Xe':54,'Cs':55,'Ba':56,'La':57,'Ce':58,
-            'Pr':59,'Nd':60,'Pm':61,'Sm':62,'Eu':63,'Gd':64,'Tb':65,'Dy':66,
-            'Ho':67,'Er':68,'Tm':69,'Yb':70,'Lu':71,'Hf':72,'Ta':73,'W':74,
-            'Re':75,'Os':76,'Ir':77,'Pt':78,'Au':79,'Hg':80,'Tl':81,'Pb':82,
-            'Bi':83,'Po':84,'At':85,'Rn':86,'Fr':87,'Ra':88,'Ac':89,'Th':90,
-            'Pa':91,'U':92,'Np':93,'Pu':94,'Am':95,'Cm':96,'Bk':97,'Cf':98,
-        }
-        self.Zp = self._Z_map.get(projectile.capitalize(), 92)
-        self.Zt = self._Z_map.get(target.capitalize(), 92)
+        self.Zp = element_to_z(projectile)
+        self.Zt = element_to_z(target)
         self.Ap, self.At = Ap, At
         self.E_lab = E_lab
         self.mu_u = Ap * At / (Ap + At)
@@ -192,6 +182,8 @@ class ImQMD_MC_Model:
         l_vals = np.array(l_vals)
         sigma_l_vals = np.array(sigma_l_vals)
         theta_cm_vals = np.array(theta_cm_vals)
+        if total_sigma <= 0 or len(l_vals) == 0:
+            return np.zeros((0, 3))
         prob_l = sigma_l_vals / total_sigma
         Zv = np.arange(dz_range[0], dz_range[1]+1)
         Nv = np.arange(dn_range[0], dn_range[1]+1)
@@ -213,7 +205,8 @@ class ImQMD_MC_Model:
             if mC <= 0 or mD <= 0: continue
 
             Q = 6*dZ + 8*dN - 0.3*(dZ**2+dN**2) + 0.1*dZ*dN
-            E_star = self.E_above * 0.6 * np.exp(-l / (max(l_vals)*0.6)) + 2.0
+            l_scale = max(float(np.max(l_vals)), 1.0)
+            E_star = self.E_above * 0.6 * np.exp(-l / (l_scale * 0.6)) + 2.0
             hivap_p = self._hivap_prob(int(mC), E_star)
             if hivap_p < 0.001: continue
 

@@ -10,7 +10,9 @@ Useful for quick estimates and as sanity checks for full DNS calculations.
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Dict, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
+
+__all__ = ["EmpiricalModel", "EmpiricalResult"]
 
 
 @dataclass
@@ -25,6 +27,10 @@ class EmpiricalModel:
     """Fast empirical cross-section parameterization for MNT."""
 
     def __init__(self, Zp: int, Ap: int, Zt: int, At: int, E_lab: float):
+        if min(Zp, Ap, Zt, At) <= 0:
+            raise ValueError("Z and A values must be positive")
+        if E_lab <= 0:
+            raise ValueError("E_lab must be positive")
         self.Zp, self.Ap = Zp, Ap
         self.Zt, self.At = Zt, At
         self.E_lab = E_lab
@@ -42,7 +48,7 @@ class EmpiricalModel:
         return -2.0 * np.sqrt(self.E_cm / (self.Ap + self.At))
 
     def estimate(self,
-                 channels: list = None) -> EmpiricalResult:
+                 channels: Optional[List[Tuple[int, int]]] = None) -> EmpiricalResult:
         """Estimate cross sections for specified transfer channels.
 
         Parameters
@@ -67,7 +73,7 @@ class EmpiricalModel:
                                         / (1.18 * (self.Ap**(1/3) + self.At**(1/3))))**2 / 100)
 
         for dp, dn in channels:
-            A_tr = dp + dn
+            A_tr = abs(dp) + abs(dn)
             if A_tr == 0:
                 continue
 

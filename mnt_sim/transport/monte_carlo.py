@@ -14,9 +14,11 @@ Method: Continuous Slowing Down Approximation (CSDA) + Monte Carlo steps.
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict
+from typing import Dict, List, Tuple
 from .stopping import StoppingPower
 from .gas_cell import GasCell
+
+__all__ = ["ParticleState", "TransportMC", "TransportResult", "run_doublediff_example"]
 
 
 @dataclass
@@ -64,6 +66,10 @@ class TransportResult:
 
     def summary(self) -> str:
         """Print a summary of the simulation."""
+        mean_dep_e = (
+            np.mean(self.deposition_energies)
+            if len(self.deposition_energies) > 0 else 0.0
+        )
         return (
             f"Transport Simulation Summary\n"
             f"{'='*40}\n"
@@ -72,8 +78,7 @@ class TransportResult:
             f"({self.deposition_efficiency*100:.1f}%)\n"
             f"Escaped cell:         {self.n_escaped} "
             f"({self.escape_fraction*100:.1f}%)\n"
-            f"Mean deposition E:    {np.mean(self.final_energies):.2f} MeV"
-            if len(self.final_energies) > 0 else ""
+            f"Mean deposition E:    {mean_dep_e:.2f} MeV"
         )
 
 
@@ -105,6 +110,14 @@ class TransportMC:
                  n_particles: int = 1000,
                  sigma_theta: float = 3.0,  # deg, angular spread from reaction
                  seed: int = None):
+        if ion_Z <= 0:
+            raise ValueError("ion_Z must be positive")
+        if ion_A <= 0:
+            raise ValueError("ion_A must be positive")
+        if n_particles <= 0:
+            raise ValueError("n_particles must be positive")
+        if sigma_theta < 0:
+            raise ValueError("sigma_theta must be non-negative")
         self.cell = gas_cell
         self.ion_Z = ion_Z
         self.ion_A = ion_A
@@ -252,6 +265,14 @@ class TransportMC:
         """
         E0 = energy if energy is not None else self.energy
         N = n_particles if n_particles is not None else self.n_particles
+        if E0 is None:
+            raise ValueError("initial energy must be provided")
+        if E0 < 0:
+            raise ValueError("initial energy must be non-negative")
+        if N <= 0:
+            raise ValueError("n_particles must be positive")
+        if step_size_mm <= 0:
+            raise ValueError("step_size_mm must be positive")
 
         dep_positions = []
         dep_energies = []

@@ -10,8 +10,15 @@ Provides publication-quality plotting for:
 """
 
 import numpy as np
-from typing import Optional, Dict, List, Tuple
-from pathlib import Path
+from typing import Dict
+
+__all__ = [
+    "plot_angle_energy_map",
+    "plot_cross_section_matrix",
+    "plot_deposition_distribution",
+    "plot_pressure_scan",
+    "plot_range_curve",
+]
 
 
 def plot_cross_section_matrix(result, ax=None, title: str = None,
