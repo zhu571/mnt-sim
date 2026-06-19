@@ -175,6 +175,11 @@ mnt-sim/
 
 **阅读顺序建议**：data/ --> cross_section/dns.py --> transport/stopping.py --> transport/gas_cell.py --> transport/monte_carlo.py
 
+**代码规范**（适用于所有模块）：
+- 每个模块顶部都有 `__all__ = [...]`，列出该模块对外暴露的类和函数
+- 所有公开函数/类的构造器都有**输入验证**：传入非法参数（负数、空值等）会立即抛 `ValueError`，不会静默算出错误结果
+- 元素/核素数据统一从 `mnt_sim.data` 导入，不在各模块重复定义
+
 ---
 
 ## 5. 核心思路：三步流水线
@@ -225,15 +230,27 @@ print(f"收集效率: {result.deposition_efficiency*100:.1f}%")
 
 这是整个项目最基础的一层——提供核素的基本物理数据。
 
-### 6.1 元素符号表 ELEMENTS
+### 6.1 元素符号表
+
+项目维护了两张互为反向的映射表：
 
 ```python
-ELEMENTS = {
+# Z -> 符号（用于把数字转成人能读的名字）
+ELEMENT_SYMBOLS = {
     0: 'n', 1: 'H', 2: 'He', 3: 'Li', ..., 92: 'U', ..., 118: 'Og'
 }
+
+# 符号 -> Z（所有截面模块统一查这张表）
+ELEMENTS = {'n': 0, 'H': 1, 'He': 2, ..., 'U': 92, ...}
 ```
 
-一个字典，键是原子序数 Z，值是元素符号。用于把数字转成人能读的名字。
+还有一张**典型质量数表**，给简化模型用（不指定 A 时取默认值）：
+
+```python
+TYPICAL_MASS_NUMBERS = {
+    'Xe': 136, 'Pb': 208, 'U': 238, 'Ca': 40, 'Pt': 198, ...
+}
+```
 
 ### 6.2 质量过剩表 MASS_EXCESS
 
@@ -252,9 +269,13 @@ MASS_EXCESS = {
 
 | 函数 | 输入 | 输出 | 用途 |
 |------|------|------|------|
+| `element_to_z(symbol)` | 元素符号如 'U' | 原子序数 92 | **所有截面模块统一调用这个**，不再各自维护映射表 |
+| `typical_mass_number(symbol)` | 元素符号 | 默认质量数 | 不指定 A 时的默认值（如 'U' -> 238） |
 | `get_nuclide(Z, A)` | 原子序数, 质量数 | Nuclide 对象 | 创建一个核素对象 |
 | `mass_excess(Z, N)` | 质子数, 中子数 | MeV | 查表或用半经验公式估算 |
 | `target_projectile_pairs()` | 无 | 列表 | 常用的弹靶组合 |
+
+> 注：传入无效符号时会抛 `ValueError`，不会静默返回 0。
 
 ### 6.4 Nuclide 数据类
 
@@ -308,15 +329,19 @@ class Nuclide:
 ```python
 class DNSModel:
     def __init__(self, projectile, target, E_lab):
-        # 1. 查元素的 Z 和 A
-        self.Zp = self._element_to_Z(projectile)  # 弹核质子数
-        self.Ap = self._element_to_A(projectile)  # 弹核质量数
+        # 1. 查元素的 Z 和 A（调用共享数据模块）
+        self.Zp = self._element_to_Z(projectile)  # -> element_to_z('U') = 92
+        self.Ap = self._element_to_A(projectile)  # -> typical_mass_number('U') = 238
         # ...靶核同理
 
         # 2. 计算运动学参数
         self.E_cm = self._compute_E_cm()           # 质心系能量
         self.V_C = self._compute_coulomb_barrier()  # 库仑势垒
 ```
+
+> **新代码变化**：`_element_to_Z()` 和 `_element_to_A()` 不再各自维护一大段硬编码字典，
+> 而是只有一行 `return element_to_z(symbol)` / `return typical_mass_number(symbol)`，
+> 数据统一在 `mnt_sim/data/__init__.py` 管理。其他模型（GRAZING、ImQMD 等）也一样。
 
 **关键概念解释**：
 
