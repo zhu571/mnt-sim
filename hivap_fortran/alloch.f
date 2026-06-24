@@ -23,7 +23,7 @@ C
 !---------- The following files are opened by N.Wang ------
 	OPEN(1236,FILE='TEMP0.DAT')  
 	OPEN(3,   FILE='TEMP1.DAT')  
-	OPEN(101, FILE='INPUT.DAT')
+	OPEN(101, FILE='input.dat')
 !----------------------------------------------------------
       RETURN
       END

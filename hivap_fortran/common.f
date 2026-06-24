@@ -62,4 +62,4 @@ C
       DIMENSION SIGF(25),STORE(27,27)
       EQUIVALENCE (RLOSTF(1),SIGF(1)),(STORE(1,1),EXC(1,1))
 C-----------------------------------------------------------------------
-      END
+C     This file is included into program units; do not terminate them here.
