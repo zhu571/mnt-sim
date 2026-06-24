@@ -1,0 +1,1206 @@
+The production of unknown neutron-rich isotopes in 238U+238U
+collisions at near-barrier energy
+Kai Zhao,1, ∗ Zhuxia Li,1, † Yingxun Zhang,1 Ning Wang,2
+Qingfeng Li,3 Caiwan Shen,3 Yongjia Wang,3 and Xizhen Wu1
+
+arXiv:1605.07393v1 [nucl-th] 24 May 2016
+
+1
+
+Department of Nuclear Physics, China Institute of Atomic Energy,
+P.O. Box 275(10), Beijing 102413, People’s Republic of China
+2
+
+Department of Physics, Guangxi Normal University,
+Guilin 541004, People’s Republic of China
+3
+
+School of Science, Huzhou University,
+
+Huzhou 313000, People’s Republic of China
+(Dated: July 6, 2018)
+
+1
+
+Abstract
+The production cross sections for primary and residual fragments with charge number from Z=70
+to 120 produced in the collision of 238 U+238 U at 7.0 MeV/nucleon are calculated by the improved
+quantum molecular dynamics (ImQMD) model incorporated with the statistical evaporation model
+(HIVAP code). The calculation results predict that about sixty unknown neutron-rich isotopes from
+element Ra (Z=88) to Db (Z=105) can be produced with the production cross sections above the
+lower bound of 10−8 mb in this reaction. And almost all of unknown neutron-rich isotopes are
+emitted at the laboratory angles θlab ≤ 60◦ . Two cases, i.e. the production of the unknown uranium
+isotopes with A ≥ 244 and that of rutherfordium with A ≥ 269 are investigated for understanding
+the production mechanism of unknown neutron-rich isotopes. It is found that for the former case
+the collision time between two uranium nuclei is shorter and the primary fragments producing the
+residues have smaller excitation energies of ≤ 30 MeV and the outgoing angles of those residues
+cover a range of 30◦ -60◦ . For the later case, the longer collision time is needed for a large number of
+nucleons being transferred and thus it results in the higher excitation energies and smaller outgoing
+angles of primary fragments, and eventually results in a very small production cross section for the
+residues of Rf with A ≥ 269 which have a small interval of outgoing angles of θlab =40◦ -50◦ .
+PACS numbers: 25.70.Hi, 25.70.Lm, 25.70.-z, 27.90.+b
+
+∗
+
+Electronic address: zhaokai@ciae.ac.cn
+
+†
+
+Electronic address: lizwux@ciae.ac.cn
+
+2
+
+I.
+
+INTRODUCTION
+
+The production of unknown neutron-rich nuclei, especially for unexplored superheavy
+nuclei and isotopes near r-process, in fusion, fission, fragmentation process and multinucleon
+transfer reactions has been of experimental and theoretical interest. A lot of more neutronrich isotopes below Ra in fragmentation process were produced in recent years[1]. But for
+the new nuclei in the ’northeast’ area of the nuclear map, it is difficult to be reached in the
+fission reactions and fragmentation processes widely used nowadays. Due to the ’curvature’
+of the stability line, it is also difficult for reaching these new more neutron-rich nuclei in
+fusion reactions with stable projectiles because of the lack of neutron number. The revival
+interest of multinucleon transfer between actinide nuclei at low-energy collisions, such as
+two 238 U, has arisen. This type of reaction provides us with an alternative way to produce
+more neutron-rich actinide and transactinide isotopes through multinucleon transfer.
+During later 1970s and early 1980s, the uranium beam available at GSI was used to
+investigate the gross features of the products of reactions 238 U+238 U and 238 U+248 Cm associated with the charge distribution and cross sections for heavy actinide isotopes[2–7]. The
+experimental data of the actinide and complementary products in the reaction 238 U+238 U
+were reexamined in 2013[8]. At GANIL, the experiment on the collision of 238 U+238 U at
+energies between 6.09 MeV/nucleon and 7.35 MeV/nucleon was performed, and the dependence of production yield of products on the beam energy and on the angle of detection
+were measured[9]. However, new neutron-rich nuclei have not been experimentally reported
+in the reaction of 238 U+238 U up to now.
+The production of unknown neutron-rich isotopes was predicted in low-energy dissipative
+collisions of 238 U+248 Cm through multinucleon transfer based on multidimensional Langevin
+equations[10, 11]. The semiclassical model GRAZING with considering the competition between neutron emission and fission showed the production of a few unknown neutron-rich
+isotopes with Z=92 to 94 in 238 U+238 U at entering energy Elab =2059 MeV[12]. Due to a
+large number of degrees of freedom, such as deformations of two nuclei, neck formation,
+nucleon transfer, nucleon emission and different types of separation of the transient composite system being involved in the reaction, it is more suitable to apply a microscopic
+dynamical model to investigate the reaction mechanism and the production of unknown isotopes. TDHF approach was used to analyze the role of nuclear deformation on collision time
+3
+
+and on nucleon transfer in central collisions of 238 U+238 U, but the production of residual
+fragments was not calculated yet[13, 14]. Microscopic transport model such as QMD type
+models were also applied to study the low energy reactions of heavy nuclei systems such
+as 197 Au+197 Au, 238 U+238 U and 232 Th+250 Cf[15–22]. By ImQMD model incorporated with
+the statistical evaporation model (HIVAP code)[23, 24], the mass distribution of products
+in 238 U+238 U at 7.0MeV/nucleon was calculated and generally in consistence with the experiment measurement of GANIL[22]. The calculated isotope distributions of the residual
+fragments and the most probable mass number of fragments were generally in agreement with
+experimental data of GSI, and the production mechanism of neutron-rich residual fragments
+was studied[25]. In this work, we will further investigate the production of the primary and
+residual fragments with charge number from Z=70 to 120 produced in reaction of 238 U+238 U
+at 7.0 MeV/nucleon.
+The structure of this paper is as follows. In Sec. II, the framework of the ImQMD
+model is briefly introduced. In Sec. III, the production cross sections for primary and
+residual fragments are calculated, and the production of unknown neutron-rich isotopes
+in the reactions of 238 U+238 U will be discussed. Further, the microscopic mechanism of
+producing these isotopes is carefully analyzed. Finally, a brief summary is given in Sec. IV.
+
+II.
+
+THEORETICAL MODEL
+
+As in the original QMD model[26–28], each nucleon is represented by a coherent state of
+a Gaussian wave packet in the ImQMD model. The time evolution of the coordinate and
+momentum for each nucleon in the mean field part is determined by Hamiltonian equations.
+The Hamiltonian includes kinetic energy, nuclear potential energy and the Coulomb energy.
+The nuclear potential energy is an integration of the Skyrme type potential energy density
+functional, which reads
+Vloc =
+
+g0
+β ργ+1
+α ρ2
++
+(∇ρ)2
+γ +
+2 ρ0 γ + 1 ρ0
+2ρ0
+cs 2
+ρη+1
++
+[ρ − κs (∇ρ)2 ]δ 2 + gτ η ,
+2ρ0
+ρ0
+
+(1)
+
+where ρ = ρn +ρp is the nucleon density and δ = (ρn −ρp )/(ρn +ρp ) is the isospin asymmetry.
+ρn , ρp are neutron and proton density, respectively.
+
+4
+
+The Coulomb energy is written as a sum of the direct and the exchange contribution:
+1
+UCoul =
+2
+
+Z Z
+
+e2
+3
+ρp (r)
+ρp (r′ )drdr′ − e2
+′
+|r − r |
+4
+
+ 1/3 Z
+3
+ρ4/3
+p dR.
+π
+
+(2)
+
+In the collision part, the phase space occupation constraint for single particle proposed
+by Papa et al.[29] is applied in each time evolution step. The isospin-dependent in-medium
+nucleon-nucleon scattering cross sections are applied. The Pauli-blocking effect is treated
+as the same as in reference[30], which is obtained according to the the Uehling-Uhlenbeck
+factor. The model parameters as those used in Ref.[20] are listed in TABLE I. More detailed
+description of ImQMD model and its applications can be found in Refs.[19, 20, 22, 31, 32].
+
+TABLE I: the model parameters
+α(MeV) β(MeV) γ g0 (MeVf m2 ) gτ (MeV) η cs (MeV) κs (f m2 ) ρ0 (f m−3 )
+-356
+
+303
+
+7/6
+
+7.0
+
+12.5
+
+2/3
+
+32
+
+0.08
+
+0.165
+
+In this work, the binding energy per nucleon and deformation of 238 U are taken as Egs =
+7.37 MeV, β2 =0.215 and β4 =0.093 given by Ref.[33]. For low-energy collision of 238 U+238 U,
+the initial condition of reaction, such as the properties of projectile and target nuclei, is
+of vital importance for the microscopic transport model. We check the binding energy,
+the root-mean-square radius and the deformation of the initial nuclei, as well as their time
+evolution carefully. Only those initially selected nuclei with no spurious particle emission
+and their properties, such as the binding energy, root-mean-square radius and deformation
+being stable within 1000fm/c are adopted. The orientations of the initial uranium nuclei
+in all events are sampled randomly with an equal probability. In the ImQMD model, the
+time evolution of the reaction for each event at different impact parameters can be tracked.
+Both the formation time and the reseparation time of the transient composite system of
+238
+
+U+238 U can be recognized in the simulations[25]. The charge number Z, mass number A
+
+and the excitation energy E ∗ of each fragment formed in each event can also be determined.
+The cross section for producing the primary fragment with Z, A and E ∗ is then calculated
+
+5
+
+by
+∗
+
+σ(Z, A, E )
+
+=
+=
+
+Z bmax
+0
+bX
+max
+
+2πbdb
+
+2πb∆b
+
+b=0
+
+Nf rag (Z, A, b, E ∗ )
+Ntot (b)
+
+Nf rag (Z, A, b, E ∗ )
+.
+Ntot (b)
+
+(3)
+
+Here b is the impact parameter, Nf rag (Z, A, b, E ∗ ) is the number of events in which a fragment
+(Z, A, E ∗) is formed at a given impact parameter b. The excitation energy E ∗ of the fragment
+with charge number Z and mass number A is obtained by subtracting the corresponding
+ground-state energy[33] from the total energy of the excited fragment in its rest frame.
+Ntot (b) is the total event number at a given impact parameter b. The outgoing angle of each
+primary fragment can be obtained from its momentum. In this work, the maximum impact
+parameter is taken to be bmax =15 fm, and the impact parameter step is ∆b=0.15 fm. The
+initial distance between the centers of mass of projectile and target is taken to be 40 fm.
+100,000 events for each impact parameter are simulated in this work.
+At 1000fm/c after the re-separation of the composite system, the ImQMD simulation is
+terminated and the primary fragments are recognized at this time as that did in Ref.[25].
+Then the de-excitation process, including the evaporation of γ, n, p and α particle and
+fission, for each excited primary fragment is performed by using the statistical evaporation
+model (HIVAP code)[23, 24]. In the HIVAP code, the survival probability of the fragment with charge number Z, mass number A and excitation energy E ∗ are calculated by
+branching ratios expressed by relative partial decay widths for all possible decay modes,
+P
+Γi (Z, A, E ∗ )/Γtot (Z, A, E ∗ ), where Γtot (Z, A, E ∗) = i Γi (Z, A, E ∗ ), and i=γ, n, p, α, and
+fission.
+
+III.
+
+RESULTS AND DISCUSSION
+
+The production cross sections for primary fragments produced in reaction 238 U+238 U
+at 7.0 MeV/nucleon are calculated by using ImQMD model. In Fig.1, the cross sections
+are plotted by black contour lines. It shows that a large amount of primary fragments
+are produced via proton and neutron transfer between projectile and target. And the most
+probable isotopes of primary fragments are located near the line with the isospin asymmetry
+close to that of 238 U (the isospin asymmetry is 0.227) on the nuclear map. It indicates that
+6
+
+120
+1.0E-01
+
+Cross section (mb)
+
+110
+
+1.0E+00
+
+Proton number
+
+Known nuclei
+
+100
+90
+
+Residual
+
+1.0E-04
+1.0E+03
+1.0E-03
+1.0E+01
+
+fragments
+
+1.0E-04
+
+(114,184)
+
+Primary
+fragments
+
+80
+238
+
+70
+100
+
+120
+
+140
+
+U+
+
+238
+
+U: 7.0 MeV/nucleon
+
+160
+
+1.0E-03
+1.0E-02
+
+180
+
+1.0E+03
+1.0E+02
+1.0E+01
+1.0E+00
+1.0E-01
+1.0E-02
+1.0E-03
+1.0E-04
+1.0E-05
+1.0E-06
+1.0E-07
+1.0E-08
+
+200
+
+Neutron number
+
+FIG. 1: (Color online) The landscape of the cross sections for primary and residual fragments
+produced in 238 U+238 U at 7.0 MeV/nucleon (logarithmic scale, the black contour lines for primary
+fragments and colored rectangles for residual fragments). The area of known nuclei are denoted by
+magenta thick line.
+
+most of reaction events have reached the isospin equilibrium at that time. The superheavy
+primary fragment (114,184) (the isospin asymmetry is 0.235) at the center of the first ’island
+of stability’ denoted by cross symbol in red color is not far from this line.
+The production cross sections for residual fragments are obtained through de-excitation
+of primary fragments by using HIVAP code and shown in Fig.1 by colored rectangles. Here
+we set the lower bound cross section to be 10−8 mb for the production of residual fragments
+in the figure. We find that the production cross sections for most of transactinide nuclei
+are smaller than 10−8 mb because it is difficult for those primary fragments to survive
+against fission due to very low fission barrier. For comparison, the area of known nuclei
+7
+
+taken from Ref.[34] are presented by the magenta thick line in the figure. Comparing the
+predicted produced residual fragments with the known nuclei area, one can find that quite a
+few unknown neutron-rich isotopes at the ’northeast’ area of nuclear map can be produced
+through multinucleon transfer between two 238 U. Some of those residues are difficult to
+be produced by fusion reactions. And most of these unknown isotopes are located in the
+region of actinide elements, and are about three to six neutrons richer than the known
+most neutron-rich nuclei. For the predicted produced light uranium-like elements with Z <
+92, we find that they can reach the border of the proton-rich side of known nuclei in the
+nuclear map. Because of the high fission barrier, the light uranium-like primary fragments
+can survive against fission more easily and de-excite through neutron evaporation leading
+to the production of proton-rich nuclei.
+It is very useful to investigate the outgoing angles of primary and residual fragments for
+experimental measurement and also for understanding the reaction mechanism. Here we
+present the calculated results of production cross sections for primary fragments at angle
+regions of θlab =0◦ -10◦ ,...,70◦ -80◦ in Fig.2. Clearly, the production cross sections for primary
+fragments vary with their emitting angles and most of transactinide primary fragments
+are emitted within angles θlab ≤ 50◦ . In the figure, red cross symbols denote the center of
+’island of stability’ (Z=114, N=184). It shows that the outgoing angles of primary fragments
+around (114,184) are within θlab ≤ 40◦ .
+The calculated production cross sections for the residual fragments emitted at angle
+regions θlab =0◦ -10◦ ,...,70◦ -80◦ are shown in Fig.3. The dotted lines denote the position of
+the heaviest actinide element Lr (Z=103). After the de-excitation process, the production
+cross sections for superheavy nuclei around the ’island of stability’ are smaller than 10−8 mb.
+It is noted from the figure that the outgoing angles of unknown actinide and transactinide
+isotopes are around θlab =0◦ -60◦ and 40◦ -50◦ , respectively.
+In order to further investigate the contribution to the production of residual fragments
+from different outgoing angles shown in Fig.3 and the production mechanism of unknown
+neutron-rich nuclei, we take the unknown uranium isotopes with A ≥ 244 as an example.
+The calculated angular distribution of residual fragments of uranium with A ≥ 244 is shown
+in Fig.4. Here the star symbols denote the total angular distribution of residual fragments
+of uranium with mass number A ≥ 244 and the contributions from the reactions within
+different impact parameter intervals are shown with the lines with different color and different
+8
+
+Proton number
+
+120
+
+120
+
+110
+
+(a) 0 -10
+
+110
+
+100
+
+Cross section (mb)
+
+100
+
+90
+Primary fragments
+
+70
+100
+
+7.0 MeV/nucleon
+
+120
+
+140
+
+160
+
+180
+
+Proton number
+
+120
+
+Proton number
+
+1.0E+02
+
+80
+
+1.0E+01
+
+70
+200 100
+
+120
+
+140
+
+160
+
+180
+
+200
+
+120
+110
+
+(c) 20 -30
+
+1.0E+00
+1.0E-01
+
+(d) 30 -40
+
+100
+
+100
+
+1.0E-02
+
+90
+
+90
+
+1.0E-03
+
+80
+
+80
+
+70
+100
+
+120
+
+140
+
+160
+
+180
+
+120
+110
+
+70
+200 100
+110
+
+100
+
+100
+
+90
+
+90
+
+80
+
+80
+
+70
+100
+110
+
+1.0E-04
+
+120
+
+140
+
+160
+
+180
+
+200
+
+140
+
+160
+
+180
+
+200
+
+140
+
+160
+
+180
+
+200
+
+120
+(e) 40 -50
+
+120
+
+140
+
+160
+
+180
+
+120
+Proton number
+
+1.0E+03
+
+90
+
+80
+
+110
+
+(b) 10 -20
+
+(f) 50 -60
+
+70
+200 100
+
+120
+
+120
+110
+
+(g) 60 -70
+
+100
+
+100
+
+90
+
+90
+
+80
+
+80
+
+70
+100
+
+120
+
+140
+
+160
+
+Neutron number
+
+180
+
+(h) 70 -80
+
+70
+200 100
+
+120
+
+Neutron number
+
+FIG. 2: (Color online) The landscape of the production cross sections for primary fragments emitted
+within different laboratory angle range in 238 U+238 U at 7.0 MeV/nucleon. The red cross symbols
+denote the center of ’island of stability’ (Z=114, N =184).
+
+symbols. For the reactions at the impact parameters b ≤ 6 fm, a double-hump distribution
+is observed, the left hump with smaller outgoing angles corresponds to the residues produced
+from the target-like primary fragments and the right ones with larger outgoing angles come
+from the projectile-like primary fragments. With the increasing of impact parameters, the
+width of the angular distribution for each hump decreases, and the peak of the left hump
+shifts from an angle of less than 10◦ to about 32.5◦ , while that of the right hump shifts from
+about 52.5◦ to 47.5◦ and the shift is much smaller compared with that of the left one. The
+total angular distribution of the residues by adding up the contributions from all impact
+parameters becomes flat with a wide hump around 30◦ -55◦, which is the superposition of
+the contributions from projectile-like and target-like primary fragments. The hump part of
+9
+
+120
+
+Proton number
+
+120
+110
+
+110
+
+(a) 0 -10
+
+90
+
+Cross section (mb)
+
+80
+70
+100
+
+residual fragments
+7.0
+
+120
+
+140
+
+A MeV
+
+160
+
+180
+
+200
+
+Proton number
+
+120
+110
+
+Proton number
+
+1.0E+03
+1.0E+02
+
+90
+
+1.0E+01
+
+80
+70
+100
+
+1.0E+00
+
+120
+
+140
+
+160
+
+180
+
+200
+
+120
+110
+
+(c) 20 -30
+
+1.0E-01
+1.0E-02
+1.0E-03
+1.0E-04
+
+(d) 30 -40
+
+100
+
+100
+
+1.0E-05
+
+90
+
+90
+
+1.0E-06
+
+80
+
+80
+
+1.0E-07
+
+70
+100
+
+70
+200 100
+
+120
+
+140
+
+160
+
+180
+
+120
+110
+
+110
+
+100
+
+100
+
+90
+
+90
+
+80
+
+80
+
+70
+100
+110
+
+120
+
+140
+
+160
+
+180
+
+200
+
+70
+100
+
+140
+
+160
+
+180
+
+200
+
+140
+
+160
+
+180
+
+200
+
+140
+
+160
+
+180
+
+200
+
+1.0E-08
+
+(f) 50 -60
+
+120
+
+120
+110
+
+(g) 60 -70
+
+100
+
+100
+
+90
+
+90
+
+80
+
+80
+
+70
+100
+
+120
+
+120
+(e) 40 -50
+
+120
+Proton number
+
+(b) 10 -20
+
+100
+
+100
+
+120
+
+140
+
+160
+
+Neutron number
+
+180
+
+200
+
+70
+100
+
+(h) 70 -80
+
+120
+
+Neutron number
+
+FIG. 3: (Color online) The landscape of the cross sections for residual fragments emitted within
+different laboratory angle range in 238 U+238 U at 7.0 MeV/nucleon. The area of known nuclei
+are denoted by magenta thick line. The dotted lines denote the position of the heaviest actinide
+element Lr (Z=103).
+
+the angular distribution mainly comes from the reactions at impact parameters b=4-8 fm.
+In order to track the origin of the two-hump behavior shown in Fig.4, we further study
+the dependence of average excitation energies < E ∗ > of primary fragments of uranium with
+A ≥ 244 and the average lifetime < Tlif e > of composite system formed in the corresponding
+events on the outgoing angles and impact parameters. In Fig.5, the < E ∗ > and the < Tlif e >
+are taken for the primary fragments in a small interval of outgoing angles ∆θlab =1◦ and from
+the reactions within an impact parameter interval ∆b=0.15 fm. In Fig.5 (a) and (b), one can
+find that the primary fragments of uranium with A ≥ 244 are separated into two branches in
+both panels: the upper one consists of the projectile-like primary fragments and the lower one
+10
+
+-2
+
+10
+
+Residual fragments of U
+with
+
+A
+
+244
+
+-3
+
+10
+
+(mb/sr)
+
+-4
+
+10
+
+-5
+
+d
+
+/d
+
+10
+
+All impact parameters
+
+-6
+
+10
+
+10
+
+b
+
+-7
+
+0
+
+2fm
+
+2fm < b
+
+4fm
+
+4fm < b
+
+6fm
+
+6fm < b
+
+8fm
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+laboratory angle (degree)
+
+FIG. 4: (Color online) The angular distribution of unknown isotopes of uranium (A ≥ 244) produced in reactions 238 U+238 U at different impact parameters.
+
+consists of target-like primary fragments. And there also exists a correspondence between
+the excitation energy of primary fragments and the life time of corresponding composite
+system, i.e. the longer the lifetime of the composite system is, the higher the excitation
+energy of the primary fragments produced from the composite system is. Further, the low
+excitation energy area of ≤ 30 MeV (the blue area) in panel (a) coincides with the area with
+short lifetime area of 200-400fm/c (the light blue area) in panel (b). Relating Fig.5 (a) and
+(b) to Fig.4, we can obtain a scene that most of the residual fragments of uranium with A ≥
+244 are produced among the reaction events, in which two uranium nuclei bombarding with
+impact parameters b=4-8 fm contact with each other for about 200-400 fm/c and then the
+composite system re-separate.
+Another example is the production of unknown isotopes of rutherfordium (Z=104) with
+A ≥ 269 for investigating the production mechanism of unknown neutron-rich transactinide
+nuclei. Fig.5 (c) and (d) show the average excitation energies of primary fragments with Z =
+104 and A ≥ 269 and the average lifetimes of their corresponding transient composite systems
+as the function of impact parameters and outgoing angles. The same as in panels (a) and (b),
+
+11
+
+laboratory angle (degree)
+laboratory angle (degree)
+
+90
+80
+70
+60
+50
+40
+30
+20
+10
+90
+80
+70
+60
+50
+40
+30
+20
+10
+
+(a)
+
+150
+
+<E*> (MeV)
+
+(b)
+
+<T
+
+120
+90
+60
+30
+
+1000
+
+> (fm/c)
+
+800
+
+life
+
+600
+400
+200
+
+0
+
+0
+
+Primary fragments of U
+
+Primary fragments of U
+with
+
+(c)
+
+A
+
+with
+
+244
+
+<E*> (MeV)
+
+(d)
+
+150
+120
+90
+60
+30
+
+<T
+
+1
+
+2
+
+3
+
+A
+
+269
+
+4
+
+5
+
+6
+
+1000
+
+> (fm/c)
+
+800
+600
+400
+
+Primary fragments of Rf
+
+A
+
+269
+
+5
+
+6
+
+with
+
+7
+
+244
+
+life
+
+Primary fragments of Rf
+with
+
+A
+
+8
+
+1
+
+Impact parameter (fm)
+
+2
+
+3
+
+4
+
+7
+
+8
+
+Impact parameter (fm)
+
+FIG. 5: (Color online)(a) The average excitation energies of primary fragments of unknown isotopes of uranium and (b) the average lifetime of composite system from which those primary
+fragments are produced. (c) and (d) are the same as (a) and (b) but for the unknown isotopes of
+rutherfordium.
+
+in Fig.5 (c) and (d) the primary fragments are also separated into two branches corresponding
+to projectile-like and target-like primary fragments, respectively. But if comparing these two
+panels with (a) and (b) more carefully, we can find large difference between the production
+of unknown rutherfordium isotopes (A ≥ 269) and that of unknown uranium isotopes (A ≥
+244). For the Rf case, because of a large number of nucleons (12 protons and over 19
+neutrons) being transferred, the collision time between projectile and target become much
+longer as is seen from panel (d), where the shortest collision time is 400fm/c. Thus the
+average excitation energies of primary fragments are all larger than 30 MeV. Moreover the
+reactions at larger impact parameter have much less contribution compared with the case
+
+12
+
+of the production of unknown uranium isotopes. Eventually, it leads to a very small cross
+section for the residual fragments of Rf with A ≥ 269. The outgoing angles of rutherfordium
+primary fragments are smaller compared with those of uranium primary fragments with
+A ≥ 244 due to the longer collision time of composite system (because of the rotation of the
+composite system). From Fig.3, one sees that the production cross sections for the residual
+fragments of Rf with A ≥ 269 are lower than 10−6mb and the outgoing angles are in a
+narrow interval of 40◦ -50◦. From Fig.3, Fig.5(c) and Fig.5(d), we can deduce that those
+residues of Rf come from such kind of reaction events, in which the projectile-like fragments
+capturing a large number of nucleons from target bring a relatively larger collective kinetic
+energy (i.e. relatively lower excitation energies) and exit with laboratory angles around
+θlab =40◦ -50◦. From these two examples, we can learn that for the unknown neutron-rich
+uranium residues, both projectile-like and target-like primary fragments with low excitation
+energies of ≤ 30 MeV provide the comparable contributions and thus the residual fragments
+have a wider angular distribution of θlab =30◦ -60◦ . As the number of transferred protons
+and neutrons increases, the collision time between projectile and target needed increases for
+the corresponding reaction events and the excitation energies of primary fragments become
+higher. Eventually, the production cross section for the residues of Rf decreases quickly
+and the outgoing angle of residues becomes narrower. It is because the outgoing angles of
+residual fragments from projectile-like primary fragments decrease due to the rotation of the
+composite system.
+IV. Summary
+In this work we apply the improved quantum molecular dynamics (ImQMD) model incorporated with the statistical evaporation model (the HIVAP code) to study the reaction
+238
+
+U+238 U at 7.0 MeV/nucleon. The calculation results of the production cross sections for
+
+the primary and residual fragments with charge number from Z=70 to 120 are presented.
+About sixty unknown neutron-rich isotopes from element Ra (Z=88) to Db (Z=105) with
+the production cross sections above the lower bound of 10−8 mb among the residual fragments produced in the reaction are predicted. The outgoing angles of primary and residual
+fragments are also investigated. We find that for most of the unknown neutron-rich isotopes
+around uranium, the outgoing angles are in a wider range of θlab =30◦ -60◦, while for those of
+heavier transactinide isotopes of Rf the outgoing angles are in a narrower range of 40◦ -50◦.
+13
+
+In order to understand the production mechanism of unknown neutron-rich isotopes, we
+study the impact parameter dependence of the excitation energies of primary fragments of
+uranium isotopes with A ≥ 244 and that of rutherfordium isotopes with A ≥ 269 and the
+lifetimes of their corresponding composite systems. We find that for the former case the
+collision time between two uranium nuclei is shorter and the primary fragments producing
+those residual fragments have low excitation energies of ≤ 30 MeV and their outgoing angles
+covers a wider range of 30◦ -60◦. And for the later case the longer collision time is needed
+for the transfer of a large number of nucleons and thus it results in the higher excitation
+energies and smaller outgoing angles of primary fragments and eventually results in a very
+small production cross sections and a narrower outgoing angle range of 40◦ -50◦ for the residual fragments of Rf with A ≥ 269. This study should be useful for us to select the suitable
+projectile and target to produce the unknown heavy neutron-rich isotopes.
+ACKNOWLEDGMENTS
+This work is supported by the National Natural Science Foundation of China under
+Grants Nos. (11005155, 11475262, 11275052, 11375062, 11547312, 11475004, 11275068)
+and National Key Basic Research Development Program of China under Grant No.
+2013CB834404. We acknowledge support by the computing server C3S2 in Huzhou University.
+
+[1] T. Kurtukian-Nieto, J. Benlliure, K.-H. Schmidt, et. al., Phys. Rev. C 89, 024616 (2014), and
+references therein.
+[2] K. D. Hildenbrand, H. Freiesleben, F. Pühlhofer, et. al., Phys. Rev. Lett 39, 1065 (1977).
+[3] M. Schädel, J. V. Kratz, H. Ahrens, et al., Phys. Rev. Lett. 41, 469 (1978).
+[4] H. Essel, K. Hartel, W. Henning, et al., Z. Phys. A 289, 265 (1979).
+[5] H. Freiesleben, K. D. Hildenbrand, F. Pühlhofer, et al., Z. Phys. A 292, 171 (1979).
+[6] M. Schädel, W. Brüchle, H. Gäggeler, et al., Phys. Rev. Lett. 48, 852 (1982).
+[7] K. J. Moody, D. Lee, R. B. Welch, et al., Phys. Rev. C 33, 1315 (1986).
+[8] J. V. Kratz, M. Schädel, and H. W. Gäggeler, Phys. Rev. C 88, 054615 (2013).
+[9] C. Golabek, A. C. C. Villari, S. Heinz, et. al., Int. J. Mod. Phys. E 17, 2235(2008).
+
+14
+
+[10] V. I. Zagrebaev and W. Greiner, Nucl. Phys. A 834, 366c (2010).
+[11] V. I. Zagrebaev and W. Greiner, Phys. Rev. C 87, 034608 (2013).
+[12] R. Yanez and W. Loveland, Phys. Rev. C 91, 044608 (2015).
+[13] Cédric Golabek, Cédric Simenel, Phys. Rev. Lett. 103, 042701 (2009).
+[14] David J. Kedziora and Cédric Simenel, Phys. Rev. C 81, 044613 (2010).
+[15] Toshiki Maruyama, A. Bonasera, M. Papa, and S. Chiba, Eur. Phys. J. A 14, 191 (2002).
+[16] Ning Wang, Li Ou, Yingxun Zhang, and Zhuxia Li, Phys. Rev. C 89, 064601 (2014).
+[17] Ning Wang, Kai Zhao, and Zhuxia Li, Phys. Rev. C 90, 054610 (2014).
+[18] Kai Wen, Fumihiko Sakata, Zhu-Xia Li, Xi-Zhen Wu, Ying-Xun Zhang, and Shan-Gui Zhou,
+Phys. Rev. Letts 111, 012501 (2013).
+[19] Ning Wang, Zhuxia Li, and Xizhen Wu, et. al., Mod. Phys. Lett. A 20, 2619 (2005).
+[20] Kai Zhao, Zhuxia Li, Xizhen Wu, and Yingxun Zhang, Phys. Rev. C 88, 044605 (2013).
+[21] Junlong Tian, Xizhen Wu, Kai Zhao, Yingxun Zhang and Zhuxia Li, Phys. Rev. C 77,
+064603(2008).
+[22] Kai Zhao, Xizhen Wu, and Zhuxia Li, Phys. Rev. C 80, 054607 (2009).
+[23] Caiwan Shen, Grigori Kosenko, and Yasuhisa Abe, Phys. Rev. C 66, 061602(R) (2002).
+[24] W. Reisdorf, F. P. Hessberger, K. D. Hildenbrand, et al., Nucl. Phys. A 444, 154 (1985).
+[25] Kai Zhao, Zhuxia Li, Ning Wang, et. al., Phys. Rev. C 92, 024613 (2015).
+[26] Jörg Aichelin, Phys. Rep. 202, 233 (1991).
+[27] J. Aichelin, C. Hartnack, A. Bohnet, et. al., Phys. Lett. B 224, 34 (1989).
+[28] C. Hartnack, Li Zhuxia, L. Neise, et. al., Nucl. Phys. A 495, 303 (1989).
+[29] Massimo Papa, Toshiki Maruyama, and Aldo Bonasera, Phys. Rev. C 64, 024612 (2001).
+[30] Qingfeng Li and Zhuxia Li, Phys. Rev. C 64, 064612 (2001).
+[31] Ning Wang, Zhuxia Li, and Xizhen Wu, Phys. Rev. C 65, 064608 (2002).
+[32] Ning Wang, Zhuxia Li, and Xizhen Wu, et. al., Phys. Rev. C 69, 034608 (2004).
+[33] P. Möller, J. R. Nix, W. D. Myers, and W. J. Swiatecki, At. Data Nucl. Data Tables 59, 185
+(1995).
+[34] G. Audi, F. G. Kondev, M. Wang, et al., Chin. Phys. C 36, 1157 (2012).
+
+15
+
+
