@@ -38,6 +38,8 @@ class ImQMDNucleus:
         self.edf = edf or SkyrmeEDF()
         self.reference_positions = None if reference_positions is None else np.asarray(reference_positions, dtype=float).copy()
         self.energy_offset = float(energy_offset)
+        self.use_surface_term = True
+        self.use_static_stabilizer = False
 
     @property
     def positions(self) -> np.ndarray:
@@ -70,7 +72,12 @@ class ImQMDNucleus:
             GaussianPacket(p.r_i.copy(), p.p_i.copy(), p.sigma_r, p.is_proton)
             for p in self.packets
         ]
-        return ImQMDNucleus(self.Z, self.N, packets, self.edf, self.reference_positions, self.energy_offset)
+        copied = ImQMDNucleus(self.Z, self.N, packets, self.edf, self.reference_positions, self.energy_offset)
+        copied.use_surface_term = bool(getattr(self, "use_surface_term", True))
+        copied.use_static_stabilizer = bool(getattr(self, "use_static_stabilizer", False))
+        if hasattr(self, "_grid_eta"):
+            copied._grid_eta = self._grid_eta
+        return copied
 
     def density(self, r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Evaluate folded neutron/proton densities at one or more points.
@@ -97,20 +104,44 @@ class ImQMDNucleus:
         rho = rho_n + rho_p
         return rho, rho_n, rho_p
 
-    def energy_components(self) -> dict[str, float]:
+    def energy_components(
+        self,
+        use_surface_term: bool | None = None,
+        use_static_stabilizer: bool | None = None,
+    ) -> dict[str, float]:
         """Return kinetic, potential, Coulomb, symmetry, and total energies."""
 
+        if use_surface_term is None:
+            use_surface_term = bool(getattr(self, "use_surface_term", True))
+        if use_static_stabilizer is None:
+            use_static_stabilizer = bool(getattr(self, "use_static_stabilizer", False))
         rho, rho_n, rho_p = self.centroid_densities()
         kinetic = self.edf.kinetic_energy(self.momenta, M_N)
         skyrme = self.edf.skyrme_potential(rho)
-        coulomb = self.edf.coulomb_energy(self.positions, self.is_proton, self.sigma_r)
+        surface = self.edf.surface_pair_energy(self.positions, self.sigma_r) if use_surface_term else 0.0
+        surface_symmetry = (
+            self.edf.surface_symmetry_energy(self.positions, self.is_proton, self.sigma_r)
+            if use_surface_term
+            else 0.0
+        )
+        coulomb_direct = self.edf.coulomb_energy(self.positions, self.is_proton, self.sigma_r)
+        coulomb_exchange = self.edf.coulomb_exchange_energy(self.positions, self.is_proton, self.sigma_r)
+        coulomb = coulomb_direct + coulomb_exchange
         symmetry = self.edf.symmetry_energy(rho_n, rho_p)
-        static = self.edf.static_mean_field_energy(self.positions, self.reference_positions)
-        potential = skyrme + coulomb + symmetry + static + self.energy_offset
+        static = (
+            self.edf.static_mean_field_energy(self.positions, self.reference_positions)
+            if use_static_stabilizer
+            else 0.0
+        )
+        potential = skyrme + surface + surface_symmetry + coulomb + symmetry + static + self.energy_offset
         return {
             "kinetic": kinetic,
             "skyrme": skyrme,
+            "surface": surface,
+            "surface_symmetry": surface_symmetry,
             "coulomb": coulomb,
+            "coulomb_direct": coulomb_direct,
+            "coulomb_exchange": coulomb_exchange,
             "symmetry": symmetry,
             "static": static,
             "potential": potential,
@@ -118,7 +149,16 @@ class ImQMDNucleus:
         }
 
     def total_energy(self) -> float:
+        if hasattr(self, '_grid_eta'):
+            from .grid_edf import GridEDF
+            grid = GridEDF(self.edf.parameters, self.sigma_r, grid_spacing=1.0, eta=self._grid_eta)
+            return grid.total_energy(self.positions, self.momenta, self.is_proton, use_surface_term=True)['total']
         return self.energy_components()["total"]
+
+    def relative_energy_drift(self, reference_energy: float) -> float:
+        """Return fractional total-energy drift from ``reference_energy``."""
+
+        return abs(self.total_energy() - float(reference_energy)) / max(abs(float(reference_energy)), 1.0)
 
     def rms_radius(self) -> tuple[float, float]:
         """Return proton and neutron RMS radii, including packet width."""

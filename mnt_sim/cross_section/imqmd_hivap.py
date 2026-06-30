@@ -369,7 +369,8 @@ class ImQMD_HIVAP_Model:
         return E_lab, th_lab
 
     def calculate_d2sigma(self, dz_range=(-8, 8), dn_range=(-10, 10),
-                           n_l=300, n_theta=90, nE=200):
+                           n_l=300, n_theta=90, nE=200,
+                           target_nuclide=None):
         """
         Full calculation: partial waves → transfer → evaporation → lab kinematics.
         Returns (theta_lab_grid, E_grid, d2sigma).
@@ -448,6 +449,11 @@ class ImQMD_HIVAP_Model:
                         for Z_fin, A_fin, evap_p in self._hivap_evaporation(Z_prim, A_prim, E_star):
                             if evap_p < 1e-6 or A_fin <= 0:
                                 continue
+                            # Optional target nuclide filter: (Z, A, dA)
+                            if target_nuclide is not None:
+                                tZ, tA, tdA = target_nuclide
+                                if Z_fin != tZ or abs(A_fin - tA) > tdA:
+                                    continue
                             A_comp_fin = self.Ap + self.At - A_fin
                             if A_comp_fin <= 0:
                                 continue

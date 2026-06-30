@@ -16,7 +16,14 @@ def main() -> None:
     nucleus = initialize_nucleus(20, 40, sigma_r=1.1)
     rp0, rn0 = nucleus.rms_radius()
     e0 = nucleus.total_energy()
-    history = propagate(nucleus, dt=1.0, n_steps=200, sample_every=20)
+    history = propagate(
+        nucleus,
+        dt=1.0,
+        n_steps=200,
+        sample_every=20,
+        use_surface_term=True,
+        use_static_stabilizer=True,
+    )
     final = history[-1]
     drift = (final["total"] - e0) / abs(e0) * 100.0
 

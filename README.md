@@ -1,95 +1,88 @@
-# MNT-SIM: Multi-Nucleon Transfer Reaction Simulation
+# MNT-SIM: ImQMD 多核子转移反应模拟
 
-多核子转移反应截面计算 + 气体单元传输沉积模拟工作区
+基于 ImQMD (Improved Quantum Molecular Dynamics) 的 MNT 反应模拟框架。笔记本开发 + nucimp 批量计算。
 
-## 概述
+## 当前状态 (2026-06-28)
 
-本项目提供一套完整的 Python 框架，用于：
+### 统一平台
 
-1. **MNT 反应截面计算** — DNS（双核系统）模型与经验参数化方法，计算多核子转移反应的微分截面
-2. **双微分截面生成** — 生成 d²σ/dE/dΩ 格式的双微分截面，作为气体单元传输的输入
-3. **气体单元传输模拟** — 基于 Monte Carlo 方法，模拟反冲核在气体单元（如 HIAF/IMP 低温气体单元）内的能量损失、射程分布与沉积位置
+| 平台 | Python | numpy | scipy | CPU |
+|------|--------|-------|-------|-----|
+| 笔记本 | 3.12.3 | 2.2.6 | 1.16.3 | Intel |
+| nucimp | 3.12.3 | 2.2.6 | 1.16.3 | AMD EPYC 48核 |
 
-## 项目结构
+### 已验证物理
 
-```
-mnt-sim/
-├── mnt_sim/
-│   ├── cross_section/        # 反应截面计算
-│   │   ├── dns.py            # DNS (双核系统) 模型
-│   │   ├── grazing.py        # GRAZING-like 半经典方法
-│   │   └── empirical.py      # 经验系统学参数化
-│   ├── transport/            # 气体单元传输
-│   │   ├── stopping.py       # 阻止本领 (Bethe-Bloch, Ziegler)
-│   │   ├── monte_carlo.py    # MC 传输模拟
-│   │   └── gas_cell.py       # 气体单元几何与边界条件
-│   ├── data/                 # 参考数据与核素表
-│   │   └── nuclides.py       # 核素质量、电荷等数据
-│   └── plot/                 # 可视化工具
-│       └── plotting.py       # 截面图、能谱图、空间分布图
-├── examples/
-│   ├── run_cross_section.py  # 截面计算示例
-│   └── run_transport.py      # 传输模拟示例
-├── config/
-│   └── default.yaml          # 默认配置文件
-├── notebooks/                # Jupyter 交互式分析
-└── README.md
-```
+| 系统 | 平台 | 结果 |
+|------|------|------|
+| ⁸⁶Kr+⁶⁴Ni b=5 (800步) | 笔记本 | Z=32(Ge) + Z=26(Fe) ✅ |
+| ⁸⁶Kr+⁶⁴Ni b=5 (800步) | nucimp | Z=37(Rb) + Z=24(Cr) ✅ |
+| ⁴⁰Ca 静态 (2000 fm/c) | 两台 | 0.00% 漂移 ✅ |
 
-## 安装
+### 已完成工作（4天）
 
-```bash
-cd "D:/work/agent work/mnt-sim"
-pip install -r requirements.txt
-```
+**实现（Phase 1-4）**：
+| 模块 | 文件 | 内容 |
+|------|------|------|
+| EDF | `skyrme.py`, `grid_edf.py` | IQ1-3b 参数集 + 质心采样 + 网格积分 |
+| 核 | `nucleus.py` | 高斯波包 + 密度 + 能量 |
+| 初始化 | `initializer.py` | 硬球 + 弛豫 `initialize_and_relax` |
+| 传播 | `propagator.py` | RK4 + Surface/Stabilizer 分拆 + GridEDF |
+| 碰撞 | `collisions.py` | NN 碰撞 + Pauli + Fermi + 邻居列表 |
+| 碎片 | `fragments.py` | MST/iso-MST + 激发能 |
+| 退激 | `decay.py` | Weisskopf 蒸发 + 裂变 |
 
-依赖：numpy, scipy, matplotlib, pandas, pyyaml
+**关键修复**：
+| 修复 | 说明 |
+|------|------|
+| `use_static_reference` 拆分 | → `use_surface_term` + `use_static_stabilizer` |
+| 参数对标论文 | MST 3.0→3.5, iso-MST nn/np 2.8→6.0, Fermi 140→170 |
+| RNG 锁定 PCG64 | 跨 numpy 1.x/2.x 一致 |
+| nucimp 部署 | numpy 1.25→2.2.6, Python 3.10→3.12（`--user` 安装，不影响他人） |
+| GridEDF | 271 行网格积分替代质心采样（待参数调优后启用） |
 
-## 快速入门
+**审计文档**（`papers/` 目录）：
+- `imqmd_model_spec.md` — 1026 行完整论文规格
+- `spec_vs_code_audit.md` — 88 项差距分析
+- `shortcut_audit.md` — 37 项实现捷径
+- `diagnosis_and_solutions.md` + `auditor_report.md`
+- `numpy_fix_proposal.md` — RNG 修复方案
 
-### 1. 计算反应截面
+### 核心参数
 
-```python
-from mnt_sim.cross_section.dns import DNSModel
+| 参数 | 值 | 来源 |
+|------|-----|------|
+| EDF | IQ2 | Wang 2014 |
+| σ_r | 1.1 fm | — |
+| MST | 3.5 fm / 250 MeV/c | Z2012 |
+| iso-MST nn/np/pp | 6.0/6.0/3.0 fm | iso-MST-R |
+| Fermi | 170 | CoMD |
+| 弛豫 | 800 fm/c | — |
+| 表面力 | ON | 物理 |
+| 静态弹簧 | OFF | 反应模式 |
 
-dns = DNSModel(projectile="Xe", target="Pb", E_lab=8.0)  # MeV/u
-xs = dns.calculate(delta_Z=2, delta_N=2)  # 2p2n 转移道
-xs.to_dataframe()
-```
+### 待完成（按优先级）
 
-### 2. 模拟气体单元传输
+| 优先级 | 任务 | 说明 |
+|:--:|------|------|
+| P0 | GridEDF 参数调优 | IQ2 在网格上需重校 |
+| P1 | 初始化重写 | 中子皮 + w_r/w_p + BE±0.05 |
+| P1 | 激发能 E* 校准 | 同尺度假基态参考 |
+| P2 | 退激发完整 | 完整 Weisskopf + p/α + 裂变 |
+| P2 | 反应截面框架 | b 扫描 + dσ/dZ/dA |
+| P3 | Zhao 2016 对比 | U+U 基准产额 |
 
-```python
-from mnt_sim.transport.gas_cell import GasCell
-from mnt_sim.transport.monte_carlo import TransportMC
+### 环境
 
-cell = GasCell(gas="He", pressure=50, length=200)  # mbar, mm
-sim = TransportMC(cell, ion="Pb-208", energy=10.0)  # MeV
-result = sim.run(n_particles=10000)
-result.plot_deposition()
-```
+**笔记本**：`~/work/agent work/mnt-sim/`
+**nucimp**：`zhuhf@210.77.75.5:1800` → `~/work/mnt-sim/`
 
-## 物理模型
+nucimp Python：`~/.local/python312/bin/python3`（不影响系统 Python 3.10）
 
-### DNS 模型
+### 文献
 
-双核系统 (Di-Nuclear System) 模型基于在相互作用过程中 projectile 和 target 保持各自独立核子体系的假设，核子通过势垒扩散转移。采用主方程 (Master Equation) 描述核子转移概率的时间演化：
+14 篇 ImQMD 论文 PDF + Zotero (合集 `ImQMD Model`, userId=9566388)
 
-```
-dP(Z,N,t)/dt = Σ ΔZ,ΔN [Λ(Z-ΔZ,N-ΔN→Z,N) P(Z-ΔZ,N-ΔN,t)
-                         - Λ(Z,N→Z+ΔZ,N+ΔN) P(Z,N,t)]
-```
+### 作者
 
-### 气体单元能量损失
-
-反冲核在 He 气中的能量损失采用 Bethe-Bloch 公式（高能区）和 Ziegler 参数化（低能区）计算，结合 Monte Carlo 模拟能散（straggling）和多次散射。
-
-## 引用
-
-如使用本代码进行研究，请引用：
-
-> 朱浩钒 et al., 多核子转移反应在低温气体单元中的传输模拟, *Nuclear Science and Techniques* (2026)
-
-## 作者
-
-朱浩钒 (Hao-Fan Zhu) — 中国科学院上海应用物理研究所 / 上海同步辐射光源
+朱浩钒 — 中国科学院近代物理研究所 / 惠州 HIAF
