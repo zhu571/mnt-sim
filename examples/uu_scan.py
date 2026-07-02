@@ -31,7 +31,6 @@ def make_uu_event(b, seed):
     nuc = ImQMDNucleus(184, 292, packets, edf=proj.edf, reference_positions=np.asarray(ref_pos))
     nuc.reference_group_ids = np.asarray(ref_grp, dtype=int)
     nuc._collision_rng = np.random.Generator(np.random.PCG64(seed + 100_000))
-    nuc._grid_eta = 0.5
     return nuc
 
 def run_one(b):

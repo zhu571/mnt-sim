@@ -36,13 +36,11 @@ class GridEDF:
         sigma_r: float,
         grid_spacing: float = 1.0,
         n_sigma: float = 3,
-        eta: float = 1.0,
     ):
         """Create a grid EDF calculator.
 
         ``grid_spacing`` is in fm. ``n_sigma`` controls both grid padding and
-        the Gaussian density cutoff radius. ``eta`` is a global scale factor
-        applied to the grid-integrated potential energy.
+        the Gaussian density cutoff radius.
         """
 
         if isinstance(parameters, str):
@@ -51,15 +49,12 @@ class GridEDF:
         self.sigma_r = float(sigma_r)
         self.grid_spacing = float(grid_spacing)
         self.n_sigma = float(n_sigma)
-        self.eta = float(eta)
         if self.sigma_r <= 0.0:
             raise ValueError("sigma_r must be positive")
         if self.grid_spacing <= 0.0:
             raise ValueError("grid_spacing must be positive")
         if self.n_sigma <= 0.0:
             raise ValueError("n_sigma must be positive")
-        if self.eta < 0.0:
-            raise ValueError("eta must be non-negative")
         self._grid: GridShape | None = None
 
     def build(self, positions: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[int, int, int]]:
@@ -235,8 +230,7 @@ class GridEDF:
             forces[i, 1] = -np.sum(d_e_local * (dy[None, :, None] / sigma2) * rho_i) * d_volume
             forces[i, 2] = -np.sum(d_e_local * (dz[None, None, :] / sigma2) * rho_i) * d_volume
 
-        forces *= self.eta
-        forces += self._coulomb_direct_forces(pos, protons) * self.eta
+        forces += self._coulomb_direct_forces(pos, protons)
         return forces
 
     def forces_numerical(
@@ -343,8 +337,7 @@ class GridEDF:
             surface_sym = 0.0
         coulomb_direct = self.coulomb_direct(positions, is_proton)
         coulomb_exchange = self.integrate(self.coulomb_exchange(rho_p))
-        potential_unscaled = skyrme_bulk + symmetry + surface + surface_sym + coulomb_direct + coulomb_exchange
-        potential = self.eta * potential_unscaled
+        potential = skyrme_bulk + symmetry + surface + surface_sym + coulomb_direct + coulomb_exchange
         return {
             "skyrme_bulk": skyrme_bulk,
             "symmetry": symmetry,
@@ -353,8 +346,6 @@ class GridEDF:
             "surface_symmetry": surface_sym,
             "coulomb_direct": coulomb_direct,
             "coulomb_exchange": coulomb_exchange,
-            "potential_unscaled": potential_unscaled,
-            "eta": self.eta,
             "potential": potential,
         }
 

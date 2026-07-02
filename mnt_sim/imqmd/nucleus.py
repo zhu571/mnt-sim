@@ -75,8 +75,6 @@ class ImQMDNucleus:
         copied = ImQMDNucleus(self.Z, self.N, packets, self.edf, self.reference_positions, self.energy_offset)
         copied.use_surface_term = bool(getattr(self, "use_surface_term", True))
         copied.use_static_stabilizer = bool(getattr(self, "use_static_stabilizer", False))
-        if hasattr(self, "_grid_eta"):
-            copied._grid_eta = self._grid_eta
         return copied
 
     def density(self, r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -149,11 +147,19 @@ class ImQMDNucleus:
         }
 
     def total_energy(self) -> float:
-        if hasattr(self, '_grid_eta'):
-            from .grid_edf import GridEDF
-            grid = GridEDF(self.edf.parameters, self.sigma_r, grid_spacing=1.0, eta=self._grid_eta)
-            return grid.total_energy(self.positions, self.momenta, self.is_proton, use_surface_term=True)['total']
-        return self.energy_components()["total"]
+        from .grid_edf import GridEDF
+
+        grid = GridEDF(self.edf.parameters, self.sigma_r, grid_spacing=1.0)
+        e_grid = grid.total_energy(
+            self.positions,
+            self.momenta,
+            self.is_proton,
+            use_surface_term=self.use_surface_term,
+        )["total"]
+        total = e_grid + self.energy_offset
+        if self.use_static_stabilizer:
+            total += self.edf.static_mean_field_energy(self.positions, self.reference_positions)
+        return float(total)
 
     def relative_energy_drift(self, reference_energy: float) -> float:
         """Return fractional total-energy drift from ``reference_energy``."""

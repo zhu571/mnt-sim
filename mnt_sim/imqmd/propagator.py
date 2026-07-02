@@ -236,24 +236,21 @@ def _rk4_step(
 
 
 def _snapshot(nucleus: ImQMDNucleus, time: float, grid_edf: GridEDF | None = None) -> dict[str, float]:
-    if grid_edf is None and hasattr(nucleus, "_grid_eta"):
-        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, eta=float(nucleus._grid_eta))
     if grid_edf is None:
-        components = nucleus.energy_components()
+        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r)
+    components = grid_edf.total_energy(
+        nucleus.positions,
+        nucleus.momenta,
+        nucleus.is_proton,
+        use_surface_term=bool(getattr(nucleus, "use_surface_term", True)),
+    )
+    if bool(getattr(nucleus, "use_static_stabilizer", False)):
+        static = nucleus.edf.static_mean_field_energy(nucleus.positions, nucleus.reference_positions)
     else:
-        components = grid_edf.total_energy(
-            nucleus.positions,
-            nucleus.momenta,
-            nucleus.is_proton,
-            use_surface_term=bool(getattr(nucleus, "use_surface_term", True)),
-        )
-        if bool(getattr(nucleus, "use_static_stabilizer", False)):
-            static = nucleus.edf.static_mean_field_energy(nucleus.positions, nucleus.reference_positions)
-        else:
-            static = 0.0
-        components["static"] = static
-        components["potential"] += static
-        components["total"] += static
+        static = 0.0
+    components["static"] = static
+    components["potential"] += static + nucleus.energy_offset
+    components["total"] += static + nucleus.energy_offset
     rp, rn = nucleus.rms_radius()
     return {
         "time": float(time),
@@ -278,7 +275,6 @@ def propagate(
     use_surface_term: bool = True,
     use_static_stabilizer: bool = False,
     use_grid_edf: bool = False,
-    grid_eta: float = 1.0,
 ) -> list[dict[str, float]]:
     """Propagate centroids with fourth-order Runge-Kutta.
 
@@ -295,9 +291,7 @@ def propagate(
     nucleus.use_surface_term = bool(use_surface_term)
     nucleus.use_static_stabilizer = bool(use_static_stabilizer)
     if use_grid_edf:
-        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, eta=grid_eta)
-    elif hasattr(nucleus, "_grid_eta"):
-        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, eta=float(nucleus._grid_eta))
+        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r)
     else:
         grid_edf = None
     history = [_snapshot(nucleus, 0.0, grid_edf=grid_edf)]

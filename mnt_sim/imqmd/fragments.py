@@ -259,30 +259,17 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
     internal_positions = positions - r_cm
     internal_momenta = momenta - p_cm
 
-    if hasattr(nucleus, "_grid_eta"):
-        from .grid_edf import GridEDF
+    from .grid_edf import GridEDF
 
-        grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0, eta=nucleus._grid_eta)
-        internal_energy = grid.total_energy(
-            internal_positions,
-            internal_momenta,
-            is_proton,
-            use_surface_term=True,
-        )["total"]
-    else:
-        packets = [
-            GaussianPacket(r.copy(), p.copy(), nucleus.sigma_r, bool(proton))
-            for r, p, proton in zip(internal_positions, internal_momenta, is_proton)
-        ]
-        sub = ImQMDNucleus(
-            int(fragment.Z),
-            int(fragment.A - fragment.Z),
-            packets,
-            edf=nucleus.edf,
-            reference_positions=None,
-            energy_offset=0.0,
-        )
-        internal_energy = sub.total_energy()
+    grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0)
+    internal_energy = grid.total_energy(
+        internal_positions,
+        internal_momenta,
+        is_proton,
+        use_surface_term=True,
+    )["total"]
+    if nucleus.A > 0:
+        internal_energy += nucleus.energy_offset * (fragment.A / nucleus.A)
 
     ground_state_energy = -binding_energy(fragment.Z, fragment.A)
     return float(max(internal_energy - ground_state_energy, 0.0))

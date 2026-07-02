@@ -263,7 +263,7 @@ def initialize_nucleus(
         ]
         nucleus = ImQMDNucleus(Z, N, packets, edf, reference_positions=positions)
         fermi_constraint_check(nucleus)
-        relaxation_grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0, eta=0.5)
+        relaxation_grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0)
         if A >= 8:
             for step in range(1, 601):
                 if A <= 80:
@@ -282,20 +282,20 @@ def initialize_nucleus(
             nucleus.reference_positions = nucleus.positions.copy()
             fermi_constraint_check(nucleus)
 
-        e_grid = _grid_energy(nucleus, grid_eta=0.5, use_surface_term=True, use_static_stabilizer=False)
-        delta = abs(e_grid - target_total)
+        e_grid = _grid_energy(nucleus, use_surface_term=True, use_static_stabilizer=False)
+        nucleus.energy_offset = target_total - e_grid
+        e_total = e_grid + nucleus.energy_offset
+        delta = abs(e_total - target_total)
         if delta < best_delta:
             best_nucleus = nucleus
             best_delta = delta
         if delta <= 0.5:
-            nucleus._grid_eta = 0.5
             _INITIALIZE_CACHE[cache_key] = nucleus.copy()
             return nucleus
 
     assert best_nucleus is not None
-    best_nucleus._grid_eta = 0.5
     warnings.warn(
-        f"Initialized Z={Z}, A={A} best GridEDF energy differs from target by {best_delta:.3f} MeV "
+        f"Initialized Z={Z}, A={A} best calibrated energy differs from target by {best_delta:.3f} MeV "
         "after 10 retries",
         RuntimeWarning,
         stacklevel=2,
@@ -313,11 +313,10 @@ def _recenter(nucleus: ImQMDNucleus) -> None:
 
 def _grid_energy(
     nucleus: ImQMDNucleus,
-    grid_eta: float,
     use_surface_term: bool = True,
     use_static_stabilizer: bool = False,
 ) -> float:
-    grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0, eta=grid_eta)
+    grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0)
     components = grid_edf.total_energy(
         nucleus.positions,
         nucleus.momenta,
@@ -344,7 +343,6 @@ def initialize_grid(
     seed: int | None = None,
     edf: SkyrmeEDF | None = None,
     use_grid: bool = True,
-    grid_eta: float = 0.5,
 ) -> ImQMDNucleus:
     """Initialize with centroid relax, then accept by GridEDF energy."""
 
@@ -360,9 +358,9 @@ def initialize_grid(
 
     for retry in range(3):
         nucleus = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=base_seed + 1000003 * retry, edf=edf)
-        nucleus._grid_eta = grid_eta
-        E_grid = _grid_energy(nucleus, grid_eta=grid_eta, use_surface_term=True, use_static_stabilizer=False)
-        delta = abs(E_grid - target_total)
+        E_grid = _grid_energy(nucleus, use_surface_term=True, use_static_stabilizer=False)
+        E_calibrated = E_grid + nucleus.energy_offset
+        delta = abs(E_calibrated - target_total)
         if delta < best_delta:
             best_nucleus = nucleus
             best_delta = delta
@@ -371,7 +369,7 @@ def initialize_grid(
 
     assert best_nucleus is not None
     warnings.warn(
-        f"Initialized grid Z={Z}, A={A} best GridEDF energy differs from target by {best_delta:.3f} MeV "
+        f"Initialized grid Z={Z}, A={A} best calibrated energy differs from target by {best_delta:.3f} MeV "
         "after 10 retries",
         RuntimeWarning,
         stacklevel=2,
@@ -403,6 +401,11 @@ def initialize_and_relax(
     retry_steps = max(1, int(round(400.0 / dt)))
     fermi_interval = max(1, int(round(2.0 / dt)))
     damping = 0.93
+    relax_grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0)
+
+    def _recompute_energy_offset() -> None:
+        e_grid = _grid_energy(nucleus, use_surface_term=True, use_static_stabilizer=False)
+        nucleus.energy_offset = -empirical_binding_per_nucleon(Z, A) * A - e_grid
 
     def relax_once(steps: int) -> None:
         for step in range(1, steps + 1):
@@ -412,12 +415,14 @@ def initialize_and_relax(
                 remove_cm_drift=True,
                 use_surface_term=True,
                 use_static_stabilizer=False,
+                grid_edf=relax_grid,
             )
             if step % fermi_interval == 0:
                 fermi_constraint_check(nucleus)
             nucleus.momenta = (nucleus.momenta - np.mean(nucleus.momenta, axis=0)) * damping
         _recenter(nucleus)
         nucleus.reference_positions = None
+        _recompute_energy_offset()
 
     def quick_no_spring_drift() -> float:
         trial = nucleus.copy()
@@ -431,6 +436,7 @@ def initialize_and_relax(
             remove_cm_drift=True,
             use_surface_term=True,
             use_static_stabilizer=False,
+            use_grid_edf=True,
         )
         return trial.relative_energy_drift(e0)
 
@@ -441,6 +447,7 @@ def initialize_and_relax(
         if drift <= 0.08:
             break
 
+    _recompute_energy_offset()
     print(f"Relaxed Z={Z}, A={A} final no-spring energy drift: {100.0 * drift:.2f}% over 500 fm/c")
     if drift > 0.08:
         warnings.warn(

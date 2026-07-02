@@ -29,7 +29,6 @@ def run_one(b):
     nuc = ImQMDNucleus(184, 292, packets, edf=proj.edf, reference_positions=np.asarray(ref_pos))
     nuc.reference_group_ids = np.asarray(ref_grp, dtype=int)
     nuc._collision_rng = np.random.Generator(np.random.PCG64(seed+100000))
-    nuc._grid_eta = 0.5
 
     # Phase 1: approach with spring stabilizer (200 steps, dt=2.0)
     propagate(nuc, dt=2.0, n_steps=200, sample_every=200,
