@@ -13,6 +13,7 @@ from .propagator import _rk4_step, propagate
 from .skyrme import HBAR_C, M_N, SkyrmeEDF, SkyrmeParameters
 
 _INITIALIZE_CACHE: dict[tuple[int, int, float, int | None, str, float], ImQMDNucleus] = {}
+_BE_ACCEPTANCE_TOLERANCE_MEV = 0.05
 
 
 def _sample_hard_sphere(rng: np.random.Generator, count: int, radius: float, min_dist: float) -> np.ndarray:
@@ -59,16 +60,22 @@ def _fermi_momenta(
     return momenta
 
 
-def _wang_skin_radii(Z: int, A: int) -> tuple[float, float, float]:
+def _wang_skin_radii(Z: int, A: int, delta_e: float = 0.0) -> tuple[float, float, float]:
     """Return charge, proton, and neutron radii from Wang et al. 2014 Sec. II.B."""
 
     N = A - Z
     I = (N - Z) / float(A)
-    r_c = 1.226 * A ** (1.0 / 3.0) + 2.86 * A ** (-2.0 / 3.0) - 1.09 * (I - I * I)
+    r_c = (
+        1.226 * A ** (1.0 / 3.0)
+        + 2.86 * A ** (-2.0 / 3.0)
+        - 1.09 * (I - I * I)
+        + 0.99 * float(delta_e) / float(A)
+    )
     delta_r_np = 0.9 * I - 0.03
-    folded_charge_radius = np.sqrt(max(r_c * r_c * 3.0 / 5.0, 0.0))
-    r_p = np.sqrt(5.0 / 3.0) * np.sqrt(max(folded_charge_radius * folded_charge_radius - 0.64, 0.0))
-    r_n = np.sqrt(5.0 / 3.0) * (folded_charge_radius + delta_r_np)
+    charge_rms = np.sqrt(max(r_c * r_c * 3.0 / 5.0, 0.0))
+    proton_rms = np.sqrt(max(charge_rms * charge_rms - 0.64, 0.0))
+    r_p = np.sqrt(5.0 / 3.0) * proton_rms
+    r_n = np.sqrt(5.0 / 3.0) * max(proton_rms + delta_r_np, 0.0)
     return float(r_c), float(r_p), float(r_n)
 
 
@@ -244,10 +251,16 @@ def initialize_nucleus(
 
         phase_space_threshold = 255.0
         max_attempts = 2000 if A <= 80 else 20
+        local_p_f = _grid_local_fermi_momentum(
+            positions,
+            is_proton,
+            GridEDF(edf.parameters, sigma_r, grid_spacing=1.0),
+            w_p=w_p,
+        )
         best_momenta: np.ndarray | None = None
         best_minimum = -np.inf
         for _ in range(max_attempts):
-            momenta = _fermi_momenta(positions, is_proton, sigma_r, rng, w_p=w_p)
+            momenta = _sample_momenta_from_fermi(local_p_f, positions, rng)
             phase_space_minimum = _phase_space_minimum(positions, momenta)
             if phase_space_minimum > best_minimum:
                 best_momenta = momenta.copy()
@@ -289,14 +302,14 @@ def initialize_nucleus(
         if delta < best_delta:
             best_nucleus = nucleus
             best_delta = delta
-        if delta <= 0.5:
+        if delta <= _BE_ACCEPTANCE_TOLERANCE_MEV:
             _INITIALIZE_CACHE[cache_key] = nucleus.copy()
             return nucleus
 
     assert best_nucleus is not None
     warnings.warn(
         f"Initialized Z={Z}, A={A} best calibrated energy differs from target by {best_delta:.3f} MeV "
-        "after 10 retries",
+        "after 3 retries",
         RuntimeWarning,
         stacklevel=2,
     )
@@ -364,13 +377,13 @@ def initialize_grid(
         if delta < best_delta:
             best_nucleus = nucleus
             best_delta = delta
-        if delta <= 0.5:
+        if delta <= _BE_ACCEPTANCE_TOLERANCE_MEV:
             return nucleus
 
     assert best_nucleus is not None
     warnings.warn(
         f"Initialized grid Z={Z}, A={A} best calibrated energy differs from target by {best_delta:.3f} MeV "
-        "after 10 retries",
+        "after 3 retries",
         RuntimeWarning,
         stacklevel=2,
     )

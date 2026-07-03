@@ -7,8 +7,9 @@ from itertools import combinations
 
 import numpy as np
 
-from .decay import binding_energy
 from .nucleus import GaussianPacket, ImQMDNucleus
+
+_COLD_GROUND_STATE_CACHE: dict[tuple[int, int, float, str, float], float] = {}
 
 
 @dataclass
@@ -268,11 +269,40 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
         is_proton,
         use_surface_term=True,
     )["total"]
-    if nucleus.A > 0:
-        internal_energy += nucleus.energy_offset * (fragment.A / nucleus.A)
 
-    ground_state_energy = -binding_energy(fragment.Z, fragment.A)
-    return float(max(internal_energy - ground_state_energy, 0.0))
+    cold_energy = cold_ground_state_energy(fragment.Z, fragment.A, nucleus)
+    return float(max(internal_energy - cold_energy, 0.0))
+
+
+def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
+    """Return cached cold-nucleus GridEDF energy for the same EDF scale."""
+
+    if A <= 1:
+        return 0.0
+    sigma_r = float(reference.sigma_r)
+    edf = reference.edf
+    cache_key = (
+        int(Z),
+        int(A),
+        round(sigma_r, 12),
+        edf.parameters.name,
+        float(edf.static_k),
+    )
+    cached = _COLD_GROUND_STATE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    from .initializer import _grid_energy, initialize_nucleus
+
+    cold = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=1000 + 17 * int(Z) + int(A), edf=edf)
+    energy_offset = cold.energy_offset
+    cold.energy_offset = 0.0
+    try:
+        energy = _grid_energy(cold, use_surface_term=True, use_static_stabilizer=False)
+    finally:
+        cold.energy_offset = energy_offset
+    _COLD_GROUND_STATE_CACHE[cache_key] = float(energy)
+    return float(energy)
 
 
 __all__ = [
@@ -280,6 +310,7 @@ __all__ = [
     "adaptive_mst",
     "coalescence_light",
     "compute_fragment_excitation",
+    "cold_ground_state_energy",
     "isospin_mst",
     "minimum_spanning_tree",
     "reaction_fragments",
