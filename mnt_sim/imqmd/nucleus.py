@@ -38,6 +38,7 @@ class ImQMDNucleus:
         self.edf = edf or SkyrmeEDF()
         self.reference_positions = None if reference_positions is None else np.asarray(reference_positions, dtype=float).copy()
         self.energy_offset = float(energy_offset)
+        self.grid_nuclear_scale = 1.0
         self.use_surface_term = True
         self.use_static_stabilizer = False
 
@@ -73,6 +74,7 @@ class ImQMDNucleus:
             for p in self.packets
         ]
         copied = ImQMDNucleus(self.Z, self.N, packets, self.edf, self.reference_positions, self.energy_offset)
+        copied.grid_nuclear_scale = float(getattr(self, "grid_nuclear_scale", 1.0))
         copied.use_surface_term = bool(getattr(self, "use_surface_term", True))
         copied.use_static_stabilizer = bool(getattr(self, "use_static_stabilizer", False))
         return copied
@@ -149,7 +151,12 @@ class ImQMDNucleus:
     def total_energy(self) -> float:
         from .grid_edf import GridEDF
 
-        grid = GridEDF(self.edf.parameters, self.sigma_r, grid_spacing=1.0)
+        grid = GridEDF(
+            self.edf.parameters,
+            self.sigma_r,
+            grid_spacing=1.0,
+            nuclear_scale=float(getattr(self, "grid_nuclear_scale", 1.0)),
+        )
         e_grid = grid.total_energy(
             self.positions,
             self.momenta,

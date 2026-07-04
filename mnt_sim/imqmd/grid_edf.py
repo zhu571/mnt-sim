@@ -36,6 +36,7 @@ class GridEDF:
         sigma_r: float,
         grid_spacing: float = 1.0,
         n_sigma: float = 3,
+        nuclear_scale: float = 1.0,
     ):
         """Create a grid EDF calculator.
 
@@ -49,12 +50,15 @@ class GridEDF:
         self.sigma_r = float(sigma_r)
         self.grid_spacing = float(grid_spacing)
         self.n_sigma = float(n_sigma)
+        self.nuclear_scale = float(nuclear_scale)
         if self.sigma_r <= 0.0:
             raise ValueError("sigma_r must be positive")
         if self.grid_spacing <= 0.0:
             raise ValueError("grid_spacing must be positive")
         if self.n_sigma <= 0.0:
             raise ValueError("n_sigma must be positive")
+        if self.nuclear_scale <= 0.0:
+            raise ValueError("nuclear_scale must be positive")
         self._grid: GridShape | None = None
 
     def build(self, positions: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[int, int, int]]:
@@ -196,17 +200,17 @@ class GridEDF:
         x = rho / p.rho0
         bulk_prime = p.alpha * x + p.beta * x**p.gamma + p.g_tau * (p.eta + 1.0) * x**p.eta
 
-        d_e_drho_n = bulk_prime.copy()
-        d_e_drho_p = bulk_prime.copy()
+        d_e_drho_n = self.nuclear_scale * bulk_prime
+        d_e_drho_p = self.nuclear_scale * bulk_prime
 
         asym = rho_n - rho_p
-        d_e_drho_n += p.c_sym / p.rho0 * asym
-        d_e_drho_p -= p.c_sym / p.rho0 * asym
+        d_e_drho_n += self.nuclear_scale * (p.c_sym / p.rho0 * asym)
+        d_e_drho_p -= self.nuclear_scale * (p.c_sym / p.rho0 * asym)
 
         if use_surface_term:
             lap = self._laplacian(rho)
-            d_e_drho_n += -(p.gsur / p.rho0) * lap
-            d_e_drho_p += -(p.gsur / p.rho0) * lap
+            d_e_drho_n += self.nuclear_scale * (-(p.gsur / p.rho0) * lap)
+            d_e_drho_p += self.nuclear_scale * (-(p.gsur / p.rho0) * lap)
 
         rho_p_safe = np.maximum(rho_p, 1.0e-12)
         d_e_drho_p += -E2 * (3.0 / np.pi) ** (1.0 / 3.0) * rho_p_safe ** (1.0 / 3.0)
@@ -326,12 +330,12 @@ class GridEDF:
         use_surface_term: bool = True,
     ) -> dict[str, float]:
         rho = rho_n + rho_p
-        skyrme_bulk = self.integrate(self.skyrme_bulk(rho, rho_n, rho_p))
-        symmetry = self.integrate(self.symmetry_term(rho, rho_n, rho_p))
+        skyrme_bulk = self.nuclear_scale * self.integrate(self.skyrme_bulk(rho, rho_n, rho_p))
+        symmetry = self.nuclear_scale * self.integrate(self.symmetry_term(rho, rho_n, rho_p))
         if use_surface_term:
             grad_rho_sq = self.gradients(rho, None)
-            surface = self.integrate(self.surface_term(grad_rho_sq))
-            surface_sym = self.integrate(self.surface_symmetry(grad_rho_sq, rho, rho_n, rho_p))
+            surface = self.nuclear_scale * self.integrate(self.surface_term(grad_rho_sq))
+            surface_sym = self.nuclear_scale * self.integrate(self.surface_symmetry(grad_rho_sq, rho, rho_n, rho_p))
         else:
             surface = 0.0
             surface_sym = 0.0

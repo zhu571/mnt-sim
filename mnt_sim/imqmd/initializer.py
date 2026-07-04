@@ -113,6 +113,78 @@ def compute_sigma_r(A: int, parameters: SkyrmeParameters | None = None) -> float
     return float(parameters.sigma0 + parameters.sigma1 * A ** (1.0 / 3.0))
 
 
+def empirical_ground_state_energy(Z: int, A: int) -> float:
+    return float(-empirical_binding_per_nucleon(int(Z), int(A)) * int(A))
+
+
+def _grid_edf(nucleus: ImQMDNucleus, grid_spacing: float = 1.0, nuclear_scale: float | None = None) -> GridEDF:
+    return GridEDF(
+        nucleus.edf.parameters,
+        nucleus.sigma_r,
+        grid_spacing=grid_spacing,
+        nuclear_scale=float(getattr(nucleus, "grid_nuclear_scale", 1.0) if nuclear_scale is None else nuclear_scale),
+    )
+
+
+def _grid_energy_components(
+    nucleus: ImQMDNucleus,
+    use_surface_term: bool = True,
+    nuclear_scale: float | None = None,
+) -> dict[str, float]:
+    grid_edf = _grid_edf(nucleus, grid_spacing=1.0, nuclear_scale=nuclear_scale)
+    return grid_edf.total_energy(
+        nucleus.positions,
+        nucleus.momenta,
+        nucleus.is_proton,
+        use_surface_term=use_surface_term,
+    )
+
+
+def _fit_grid_nuclear_scale(components: dict[str, float], target_total: float) -> float:
+    kinetic = float(components["kinetic"])
+    coulomb = float(components["coulomb_direct"] + components["coulomb_exchange"])
+    nuclear = float(
+        components["skyrme_bulk"] + components["symmetry"] + components["surface"] + components["surface_symmetry"]
+    )
+    if abs(nuclear) <= 1.0e-9:
+        return 1.0
+    scale = (float(target_total) - kinetic - coulomb) / nuclear
+    return float(np.clip(scale, 0.35, 1.25))
+
+
+def grid_energy_diagnostics(
+    Z: int,
+    A: int,
+    sigma_r: float = 1.1,
+    seed: int | None = None,
+    edf: SkyrmeEDF | None = None,
+) -> dict[str, float]:
+    nucleus = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=seed, edf=edf)
+    target_total = empirical_ground_state_energy(Z, A)
+    raw = _grid_energy_components(nucleus, use_surface_term=True, nuclear_scale=1.0)
+    nuclear_scale = _fit_grid_nuclear_scale(raw, target_total)
+    scaled = _grid_energy_components(nucleus, use_surface_term=True, nuclear_scale=nuclear_scale)
+    calibrated_offset = target_total - scaled["total"]
+    return {
+        "Z": float(Z),
+        "A": float(A),
+        "sigma_r": float(nucleus.sigma_r),
+        "target_total": float(target_total),
+        "raw_total": float(raw["total"]),
+        "raw_kinetic": float(raw["kinetic"]),
+        "raw_skyrme_bulk": float(raw["skyrme_bulk"]),
+        "raw_symmetry": float(raw["symmetry"]),
+        "raw_surface": float(raw["surface"]),
+        "raw_surface_symmetry": float(raw["surface_symmetry"]),
+        "raw_coulomb_direct": float(raw["coulomb_direct"]),
+        "raw_coulomb_exchange": float(raw["coulomb_exchange"]),
+        "nuclear_scale": float(nuclear_scale),
+        "scaled_total": float(scaled["total"]),
+        "scaled_potential": float(scaled["potential"]),
+        "energy_offset": float(calibrated_offset),
+    }
+
+
 def _trilinear_interpolate(grid_edf: GridEDF, values: np.ndarray, positions: np.ndarray) -> np.ndarray:
     """Interpolate a grid scalar field to arbitrary positions."""
 
@@ -240,7 +312,7 @@ def initialize_nucleus(
 
     base_seed = seed if seed is not None else 1000 + 17 * Z + A
     N = A - Z
-    target_total = -empirical_binding_per_nucleon(Z, A) * A
+    target_total = empirical_ground_state_energy(Z, A)
     w_p = float(getattr(edf.parameters, "w_p", 60.0))
     best_nucleus: ImQMDNucleus | None = None
     best_delta = np.inf
@@ -295,9 +367,11 @@ def initialize_nucleus(
             nucleus.reference_positions = nucleus.positions.copy()
             fermi_constraint_check(nucleus)
 
-        e_grid = _grid_energy(nucleus, use_surface_term=True, use_static_stabilizer=False)
-        nucleus.energy_offset = target_total - e_grid
-        e_total = e_grid + nucleus.energy_offset
+        raw_components = _grid_energy_components(nucleus, use_surface_term=True, nuclear_scale=1.0)
+        nucleus.grid_nuclear_scale = _fit_grid_nuclear_scale(raw_components, target_total)
+        scaled_components = _grid_energy_components(nucleus, use_surface_term=True)
+        nucleus.energy_offset = target_total - scaled_components["total"]
+        e_total = scaled_components["total"] + nucleus.energy_offset
         delta = abs(e_total - target_total)
         if delta < best_delta:
             best_nucleus = nucleus
@@ -329,7 +403,7 @@ def _grid_energy(
     use_surface_term: bool = True,
     use_static_stabilizer: bool = False,
 ) -> float:
-    grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0)
+    grid_edf = _grid_edf(nucleus, grid_spacing=1.0)
     components = grid_edf.total_energy(
         nucleus.positions,
         nucleus.momenta,
@@ -364,7 +438,7 @@ def initialize_grid(
     edf = edf or SkyrmeEDF()
     if sigma_r == 1.1:
         sigma_r = compute_sigma_r(A, edf.parameters)
-    target_total = -empirical_binding_per_nucleon(Z, A) * A
+    target_total = empirical_ground_state_energy(Z, A)
     best_nucleus: ImQMDNucleus | None = None
     best_delta = np.inf
     base_seed = seed if seed is not None else 1000 + 17 * Z + A
@@ -418,7 +492,7 @@ def initialize_and_relax(
 
     def _recompute_energy_offset() -> None:
         e_grid = _grid_energy(nucleus, use_surface_term=True, use_static_stabilizer=False)
-        nucleus.energy_offset = -empirical_binding_per_nucleon(Z, A) * A - e_grid
+        nucleus.energy_offset = empirical_ground_state_energy(Z, A) - e_grid
 
     def relax_once(steps: int) -> None:
         for step in range(1, steps + 1):
@@ -478,4 +552,6 @@ __all__ = [
     "initialize_and_relax",
     "initialize_grid",
     "initialize_nucleus",
+    "empirical_ground_state_energy",
+    "grid_energy_diagnostics",
 ]

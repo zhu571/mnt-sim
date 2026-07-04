@@ -237,7 +237,11 @@ def _rk4_step(
 
 def _snapshot(nucleus: ImQMDNucleus, time: float, grid_edf: GridEDF | None = None) -> dict[str, float]:
     if grid_edf is None:
-        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r)
+        grid_edf = GridEDF(
+            nucleus.edf.parameters,
+            nucleus.sigma_r,
+            nuclear_scale=float(getattr(nucleus, "grid_nuclear_scale", 1.0)),
+        )
     components = grid_edf.total_energy(
         nucleus.positions,
         nucleus.momenta,
@@ -275,6 +279,7 @@ def propagate(
     use_surface_term: bool = True,
     use_static_stabilizer: bool = False,
     use_grid_edf: bool = False,
+    apply_fermi_constraint: bool | None = None,
 ) -> list[dict[str, float]]:
     """Propagate centroids with fourth-order Runge-Kutta.
 
@@ -284,6 +289,8 @@ def propagate(
     if sample_every is None:
         sample_every = max(1, n_steps // 200)
     collision_interval = 1
+    if apply_fermi_constraint is None:
+        apply_fermi_constraint = not with_collisions
     fermi_time = 20.0 if use_static_stabilizer else 5.0
     fermi_interval = max(1, int(round(fermi_time / float(dt))))
     if collision_dt is not None:
@@ -291,7 +298,11 @@ def propagate(
     nucleus.use_surface_term = bool(use_surface_term)
     nucleus.use_static_stabilizer = bool(use_static_stabilizer)
     if use_grid_edf:
-        grid_edf = GridEDF(nucleus.edf.parameters, nucleus.sigma_r)
+        grid_edf = GridEDF(
+            nucleus.edf.parameters,
+            nucleus.sigma_r,
+            nuclear_scale=float(getattr(nucleus, "grid_nuclear_scale", 1.0)),
+        )
     else:
         grid_edf = None
     history = [_snapshot(nucleus, 0.0, grid_edf=grid_edf)]
@@ -306,7 +317,7 @@ def propagate(
         )
         if with_collisions and step % collision_interval == 0:
             attempt_nn_collision(nucleus, dt=float(dt) * collision_interval)
-        if with_collisions and step % fermi_interval == 0:
+        if with_collisions and apply_fermi_constraint and step % fermi_interval == 0:
             fermi_constraint_check(nucleus)
         if step % sample_every == 0 or step == n_steps:
             history.append(_snapshot(nucleus, step * dt, grid_edf=grid_edf))
