@@ -290,7 +290,8 @@ def propagate(
         sample_every = max(1, n_steps // 200)
     collision_interval = 1
     if apply_fermi_constraint is None:
-        apply_fermi_constraint = not with_collisions
+        apply_fermi_constraint = True  # always apply, but relaxed during collisions
+    fermi_threshold = 170.0 if with_collisions else 255.0
     fermi_time = 20.0 if use_static_stabilizer else 5.0
     fermi_interval = max(1, int(round(fermi_time / float(dt))))
     if collision_dt is not None:
@@ -318,7 +319,7 @@ def propagate(
         if with_collisions and step % collision_interval == 0:
             attempt_nn_collision(nucleus, dt=float(dt) * collision_interval)
         if with_collisions and apply_fermi_constraint and step % fermi_interval == 0:
-            fermi_constraint_check(nucleus)
+            fermi_constraint_check(nucleus, threshold=fermi_threshold)
         if step % sample_every == 0 or step == n_steps:
             history.append(_snapshot(nucleus, step * dt, grid_edf=grid_edf))
     return history

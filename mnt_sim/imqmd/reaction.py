@@ -234,6 +234,7 @@ def run_imqmd_event(
     iso_r_cut_np: float = 6.0,
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
+    use_grid_edf: bool = False,
 ) -> ImpactParameterEvent:
     """Run one ImQMD event through fragment recognition and de-excitation."""
 
@@ -265,7 +266,7 @@ def run_imqmd_event(
         remove_cm_drift=False,
         use_surface_term=True,
         use_static_stabilizer=False,
-        use_grid_edf=True,
+        use_grid_edf=use_grid_edf,
     )
     fragments = identify_fragments(
         system,
@@ -330,6 +331,7 @@ def impact_parameter_scan(
     p_cut: float | None = 250.0,
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
+    use_grid_edf: bool = False,
 ) -> CrossSectionScanResult:
     """Run an impact-parameter scan and accumulate ``dσ/dZ``."""
 
@@ -366,6 +368,7 @@ def impact_parameter_scan(
                     "p_cut": p_cut,
                     "edf": edf,
                     "resample_initial_nuclei": bool(resample_initial_nuclei),
+                    "use_grid_edf": bool(use_grid_edf),
                 }
             )
 
