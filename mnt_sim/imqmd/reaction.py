@@ -234,7 +234,7 @@ def run_imqmd_event(
     iso_r_cut_np: float = 6.0,
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
-    use_grid_edf: bool = False,
+    use_grid_edf: bool = True,
 ) -> ImpactParameterEvent:
     """Run one ImQMD event through fragment recognition and de-excitation."""
 
@@ -331,7 +331,7 @@ def impact_parameter_scan(
     p_cut: float | None = 250.0,
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
-    use_grid_edf: bool = False,
+    use_grid_edf: bool = True,
 ) -> CrossSectionScanResult:
     """Run an impact-parameter scan and accumulate ``dσ/dZ``."""
 
