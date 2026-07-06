@@ -315,9 +315,15 @@ def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
         return cached
 
     from .initializer import initialize_nucleus
+    from .grid_edf import GridEDF
 
     cold = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=1000 + 17 * int(Z) + int(A), edf=edf)
-    energy = cold.total_energy()
+    # Use same GridEDF energy scale as compute_fragment_excitation
+    scale = fragment_ground_state_scale(Z, A, reference)
+    grid = GridEDF(edf.parameters, sigma_r, grid_spacing=1.0, nuclear_scale=scale)
+    energy = grid.total_energy(
+        cold.positions, cold.momenta, cold.is_proton, use_surface_term=True
+    )["total"]
     _COLD_GROUND_STATE_CACHE[cache_key] = float(energy)
     return float(energy)
 
