@@ -198,8 +198,21 @@ def identify_fragments(
     return sorted(fragments, key=lambda fragment: fragment.A, reverse=True)
 
 
-def _record_fragment(fragment: Fragment, rng: np.random.Generator) -> EventFragmentRecord:
-    final_Z, final_A = evaporate_full(fragment.Z, fragment.A, fragment.excitation_energy, rng=rng)
+def _record_fragment(
+    fragment: Fragment,
+    rng: np.random.Generator,
+    use_hivap: bool = False,
+) -> EventFragmentRecord:
+    if use_hivap:
+        from .hivap_wrapper import sample_residue
+
+        final_Z, final_A = sample_residue(
+            fragment.Z, fragment.A, fragment.excitation_energy, rng=rng
+        )
+    else:
+        final_Z, final_A = evaporate_full(
+            fragment.Z, fragment.A, fragment.excitation_energy, rng=rng
+        )
     return EventFragmentRecord(
         Z=int(fragment.Z),
         A=int(fragment.A),
@@ -235,6 +248,7 @@ def run_imqmd_event(
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
     use_grid_edf: bool = True,
+    use_hivap: bool = False,
 ) -> ImpactParameterEvent:
     """Run one ImQMD event through fragment recognition and de-excitation."""
 
@@ -277,7 +291,7 @@ def run_imqmd_event(
         iso_r_cut_np=iso_r_cut_np,
     )
     decay_rng = np.random.default_rng(int(decay_seed + 1000 * seed_offset))
-    records = tuple(_record_fragment(fragment, decay_rng) for fragment in fragments)
+    records = tuple(_record_fragment(fragment, decay_rng, use_hivap=use_hivap) for fragment in fragments)
     collision_stats = getattr(system, "collision_stats", {})
     return ImpactParameterEvent(
         b=float(impact_parameter),
@@ -332,6 +346,7 @@ def impact_parameter_scan(
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
     use_grid_edf: bool = True,
+    use_hivap: bool = False,
 ) -> CrossSectionScanResult:
     """Run an impact-parameter scan and accumulate ``dσ/dZ``."""
 
@@ -369,6 +384,7 @@ def impact_parameter_scan(
                     "edf": edf,
                     "resample_initial_nuclei": bool(resample_initial_nuclei),
                     "use_grid_edf": bool(use_grid_edf),
+                    "use_hivap": bool(use_hivap),
                 }
             )
 
