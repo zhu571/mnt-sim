@@ -274,7 +274,9 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
         use_surface_term=True,
     )["total"]
 
-    cold_energy = cold_ground_state_energy(fragment.Z, fragment.A, nucleus)
+    from .decay import binding_energy
+
+    cold_energy = -binding_energy(fragment.Z, fragment.A)
     return float(max(internal_energy - cold_energy, 0.0))
 
 

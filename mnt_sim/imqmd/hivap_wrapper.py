@@ -170,21 +170,19 @@ def sample_residue(
     if not channels:
         return z_frag, a_frag
 
-    # Filter out fission for now (treat fission as loss)
-    non_fission = [(z, a, p) for z, a, p in channels if z >= 0]
-    if not non_fission:
-        return z_frag, a_frag
-
-    zs = [z for z, a, p in non_fission]
-    a_s = [a for z, a, p in non_fission]
-    ps = [p for z, a, p in non_fission]
+    # Use all channels including fission (-1, -1)
+    zs = [z for z, a, p in channels]
+    a_s = [a for z, a, p in channels]
+    ps = [p for z, a, p in channels]
     total_p = sum(ps)
     if total_p <= 0:
         return z_frag, a_frag
     ps = [p / total_p for p in ps]
 
-    idx = rng.choice(len(non_fission), p=ps)
-    return zs[idx], a_s[idx]
+    idx = rng.choice(len(channels), p=ps)
+    zf, af = zs[idx], a_s[idx]
+    if zf == -1:  # fission
+        return z_frag, a_frag  # keep original fragment as placeholder
 
 
 __all__ = ["run_hivap", "sample_residue"]
