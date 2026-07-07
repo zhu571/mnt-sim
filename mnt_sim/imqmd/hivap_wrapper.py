@@ -183,6 +183,7 @@ def sample_residue(
     zf, af = zs[idx], a_s[idx]
     if zf == -1:  # fission
         return z_frag, a_frag  # keep original fragment as placeholder
+    return zf, af
 
 
 __all__ = ["run_hivap", "sample_residue"]
