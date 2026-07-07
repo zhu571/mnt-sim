@@ -62,15 +62,16 @@ class GridEDF:
         self._grid: GridShape | None = None
 
     def _effective_scale(self, rho: np.ndarray) -> np.ndarray:
-        """Density-dependent scale that approaches 1.0 at high density.
+        """Density-dependent scale: nuclear_scale at ρ≤ρ₀, shifts toward 1.0 above.
 
-        At normal nuclear density (ρ≈ρ₀) uses the calibrated nuclear_scale,
-        but smoothly transitions to 1.0 at collision overlap densities
-        (ρ≫ρ₀) to preserve the correct repulsive EOS stiffness.
+        At collision overlap densities (ρ>ρ₀) the repulsive EOS must not be
+        softened by the nuclear_scale calibration.  Only ρ>ρ₀ is affected;
+        the surface and bulk at normal density keep the calibrated scale.
         """
-        x = np.clip(np.asarray(rho, dtype=float) / self.parameters.rho0, 0.0, None)
-        w = np.exp(-(x - 1.0) ** 2 / 0.5)
-        return self.nuclear_scale * w + 1.0 * (1.0 - w)
+        x = np.clip(np.asarray(rho, dtype=float) / self.parameters.rho0, 1.0, None)
+        # Sigmoid: 0 at x=1, 0.5 at x=1.5, ~1 at x=2.5
+        ramp = 1.0 / (1.0 + np.exp(-8.0 * (x - 1.5)))
+        return self.nuclear_scale + (1.0 - self.nuclear_scale) * ramp
 
     def build(self, positions: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[int, int, int]]:
         """Auto-size the grid from nucleon positions and return axes and sizes."""
