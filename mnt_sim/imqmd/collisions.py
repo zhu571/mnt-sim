@@ -364,9 +364,16 @@ def attempt_nn_collision(nucleus: ImQMDNucleus, dt: float) -> dict[str, int]:
     return stats
 
 
-def fermi_constraint_check(nucleus: ImQMDNucleus, threshold: float = 255.0) -> int:
-    """Apply a CoMD-style phase-space constraint to all nucleon pairs."""
+def fermi_constraint_check(
+    nucleus: ImQMDNucleus,
+    threshold: float = 255.0,
+    group_ids: np.ndarray | None = None,
+) -> int:
+    """Apply a CoMD-style phase-space constraint to nucleon pairs.
 
+    When ``group_ids`` is provided, only pairs from the *same* group are
+    constrained, allowing nucleon exchange across groups during collisions.
+    """
     rng = _rng(nucleus)
     positions = nucleus.positions
     momenta = nucleus.momenta
@@ -376,6 +383,11 @@ def fermi_constraint_check(nucleus: ImQMDNucleus, threshold: float = 255.0) -> i
         return 0
 
     iu, ju = np.triu_indices(nucleus.A, 1)
+    if group_ids is not None:
+        same_group = group_ids[iu] == group_ids[ju]
+        iu, ju = iu[same_group], ju[same_group]
+        if len(iu) == 0:
+            return 0
     dr_vec = positions[iu] - positions[ju]
     dp_all = momenta[iu] - momenta[ju]
     dr_all = np.linalg.norm(dr_vec, axis=1)

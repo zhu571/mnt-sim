@@ -319,7 +319,8 @@ def propagate(
         if with_collisions and step % collision_interval == 0:
             attempt_nn_collision(nucleus, dt=float(dt) * collision_interval)
         if with_collisions and apply_fermi_constraint and step % fermi_interval == 0:
-            fermi_constraint_check(nucleus, threshold=fermi_threshold)
+            group_ids = getattr(nucleus, "reference_group_ids", None)
+            fermi_constraint_check(nucleus, threshold=fermi_threshold, group_ids=group_ids)
         if step % sample_every == 0 or step == n_steps:
             history.append(_snapshot(nucleus, step * dt, grid_edf=grid_edf))
     return history
