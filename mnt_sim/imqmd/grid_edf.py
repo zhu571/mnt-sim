@@ -61,6 +61,17 @@ class GridEDF:
             raise ValueError("nuclear_scale must be positive")
         self._grid: GridShape | None = None
 
+    def _effective_scale(self, rho: np.ndarray) -> np.ndarray:
+        """Density-dependent scale that approaches 1.0 at high density.
+
+        At normal nuclear density (ρ≈ρ₀) uses the calibrated nuclear_scale,
+        but smoothly transitions to 1.0 at collision overlap densities
+        (ρ≫ρ₀) to preserve the correct repulsive EOS stiffness.
+        """
+        x = np.clip(np.asarray(rho, dtype=float) / self.parameters.rho0, 0.0, None)
+        w = np.exp(-(x - 1.0) ** 2 / 0.5)
+        return self.nuclear_scale * w + 1.0 * (1.0 - w)
+
     def build(self, positions: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[int, int, int]]:
         """Auto-size the grid from nucleon positions and return axes and sizes."""
 
@@ -200,17 +211,17 @@ class GridEDF:
         x = rho / p.rho0
         bulk_prime = p.alpha * x + p.beta * x**p.gamma + p.g_tau * (p.eta + 1.0) * x**p.eta
 
-        d_e_drho_n = self.nuclear_scale * bulk_prime
-        d_e_drho_p = self.nuclear_scale * bulk_prime
+        d_e_drho_n = self._effective_scale(rho) * bulk_prime
+        d_e_drho_p = self._effective_scale(rho) * bulk_prime
 
         asym = rho_n - rho_p
-        d_e_drho_n += self.nuclear_scale * (p.c_sym / p.rho0 * asym)
-        d_e_drho_p -= self.nuclear_scale * (p.c_sym / p.rho0 * asym)
+        d_e_drho_n += self._effective_scale(rho) * (p.c_sym / p.rho0 * asym)
+        d_e_drho_p -= self._effective_scale(rho) * (p.c_sym / p.rho0 * asym)
 
         if use_surface_term:
             lap = self._laplacian(rho)
-            d_e_drho_n += self.nuclear_scale * (-(p.gsur / p.rho0) * lap)
-            d_e_drho_p += self.nuclear_scale * (-(p.gsur / p.rho0) * lap)
+            d_e_drho_n += self._effective_scale(rho) * (-(p.gsur / p.rho0) * lap)
+            d_e_drho_p += self._effective_scale(rho) * (-(p.gsur / p.rho0) * lap)
 
         rho_p_safe = np.maximum(rho_p, 1.0e-12)
         d_e_drho_p += -E2 * (3.0 / np.pi) ** (1.0 / 3.0) * rho_p_safe ** (1.0 / 3.0)
