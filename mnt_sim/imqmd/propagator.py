@@ -290,8 +290,8 @@ def propagate(
         sample_every = max(1, n_steps // 200)
     collision_interval = 1
     if apply_fermi_constraint is None:
-        apply_fermi_constraint = True  # always apply, but relaxed during collisions
-    fermi_threshold = 1.0  # Wigner occupation threshold (CoMD standard)
+        apply_fermi_constraint = not with_collisions  # off during collisions
+    fermi_threshold = 255.0
     fermi_time = 20.0 if use_static_stabilizer else 5.0
     fermi_interval = max(1, int(round(fermi_time / float(dt))))
     if collision_dt is not None:
