@@ -436,7 +436,12 @@ def fermi_constraint_check(
         return 0
 
     occupations = _compute_occupation_field(nucleus, group_ids)
-    violating = np.flatnonzero(occupations > float(threshold))
+    # Dynamic threshold: Gaussian packets overestimate occupation in heavy
+    # nuclei (U238: mean 2.6, max 6.0 with sigma_r=1.1 fm).  Only constrain
+    # nucleons whose occupation is significantly above the median.
+    median_occ = float(np.median(occupations))
+    effective_threshold = max(float(threshold), median_occ + 1.0)
+    violating = np.flatnonzero(occupations > effective_threshold)
     if len(violating) == 0:
         return 0
 
