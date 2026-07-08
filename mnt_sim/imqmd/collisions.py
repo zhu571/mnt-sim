@@ -364,15 +364,68 @@ def attempt_nn_collision(nucleus: ImQMDNucleus, dt: float) -> dict[str, int]:
     return stats
 
 
+def _compute_occupation_field(
+    nucleus: ImQMDNucleus,
+    group_ids: np.ndarray | None = None,
+) -> np.ndarray:
+    """Compute Wigner phase-space occupation for every nucleon.
+
+    Returns array of length nucleus.A with occupation numbers.
+    Only same-species, same-group nucleons contribute.
+    """
+    positions = nucleus.positions
+    momenta = nucleus.momenta
+    is_proton = nucleus.is_proton
+    sigma_r = nucleus.sigma_r
+    sigma_p = HBAR_C / (2.0 * sigma_r)
+    n = nucleus.A
+
+    # Cache per-nucleon Wigner density kernel
+    wigner_norm = 1.0 / (np.pi * HBAR_C) ** 3
+    ps_cell = (2.0 * np.pi * HBAR_C) ** 3 / 4.0
+    scale = ps_cell * wigner_norm  # = 2.0
+
+    occupations = np.zeros(n, dtype=float)
+    for i in range(n):
+        if group_ids is not None:
+            mask = (nucleus.is_proton == is_proton[i]) & (group_ids == group_ids[i])
+        else:
+            mask = nucleus.is_proton == is_proton[i]
+        mask[i] = False
+        if not np.any(mask):
+            continue
+        dr2 = np.sum((positions[mask] - positions[i]) ** 2, axis=1)
+        dp2 = np.sum((momenta[mask] - momenta[i]) ** 2, axis=1)
+        weights = np.exp(-dr2 / (2.0 * sigma_r**2) - dp2 / (2.0 * sigma_p**2))
+        occupations[i] = scale * np.sum(weights)
+    return occupations
+
+
 def fermi_constraint_check(
     nucleus: ImQMDNucleus,
-    threshold: float = 255.0,
+    threshold: float = 1.0,
     group_ids: np.ndarray | None = None,
 ) -> int:
-    """Apply a CoMD-style phase-space constraint to nucleon pairs.
+    """Apply the CoMD phase-space occupation constraint (Papa & Bonasera 2001).
 
-    When ``group_ids`` is provided, only pairs from the *same* group are
-    constrained, allowing nucleon exchange across groups during collisions.
+    Computes the Wigner occupation f_i for each nucleon from same-species
+    neighbours.  If f_i > threshold (default 1.0, corresponding to one
+    spin-degenerate state per phase-space cell h³/4), the nucleon and its
+    nearest same-group neighbour exchange relative momentum to reduce the
+    occupancy.
+
+    When ``group_ids`` is provided, only same-group nucleons contribute
+    to the occupation, allowing natural nucleon exchange across groups
+    (projectile ↔ target) during collisions — matching the CoMD methodology.
+
+    Parameters
+    ----------
+    nucleus : ImQMDNucleus
+    threshold : float
+        Maximum allowed Wigner occupation per nucleon.  Default 1.0.
+    group_ids : np.ndarray or None
+        (A,) integer array grouping nucleons.  Nucleons in different
+        groups never constrain each other.
     """
     rng = _rng(nucleus)
     positions = nucleus.positions
@@ -382,41 +435,50 @@ def fermi_constraint_check(
     if nucleus.A < 2:
         return 0
 
-    iu, ju = np.triu_indices(nucleus.A, 1)
-    if group_ids is not None:
-        same_group = group_ids[iu] == group_ids[ju]
-        iu, ju = iu[same_group], ju[same_group]
-        if len(iu) == 0:
-            return 0
-    dr_vec = positions[iu] - positions[ju]
-    dp_all = momenta[iu] - momenta[ju]
-    dr_all = np.linalg.norm(dr_vec, axis=1)
-    dp_norm = np.linalg.norm(dp_all, axis=1)
-    violating = np.flatnonzero(dr_all * dp_norm < threshold)
+    occupations = _compute_occupation_field(nucleus, group_ids)
+    violating = np.flatnonzero(occupations > float(threshold))
+    if len(violating) == 0:
+        return 0
 
-    for pair_index in violating:
-        i = int(iu[pair_index])
-        j = int(ju[pair_index])
-        dr = float(np.linalg.norm(positions[i] - positions[j]))
-        dp_vec = momenta[i] - momenta[j]
-        dp = float(np.linalg.norm(dp_vec))
-        if dr * dp >= threshold:
+    # For each violating nucleon, find nearest same-group same-species neighbour
+    is_proton = nucleus.is_proton
+    for i in violating:
+        if group_ids is not None:
+            candidates = np.flatnonzero(
+                (is_proton == is_proton[i]) & (group_ids == group_ids[i])
+            )
+        else:
+            candidates = np.flatnonzero(is_proton == is_proton[i])
+        candidates = candidates[candidates != i]
+        if len(candidates) == 0:
             continue
-        p_cm = 0.5 * (momenta[i] + momenta[j])
+
+        dists = np.sum((positions[candidates] - positions[i]) ** 2, axis=1)
+        j = candidates[np.argmin(dists)]
+
+        p_i = momenta[i].copy()
+        p_j = momenta[j].copy()
+        p_cm = 0.5 * (p_i + p_j)
+        dp_vec = p_i - p_j
+        dp = float(np.linalg.norm(dp_vec))
+
+        # Reshuffle relative momentum to increase phase-space separation
         if dp > 1.0e-12:
             direction = dp_vec / dp
         else:
             direction = rng.normal(size=3)
             norm = np.linalg.norm(direction)
-            direction = np.array([1.0, 0.0, 0.0]) if norm == 0.0 else direction / norm
-        target_dp = threshold / max(dr, 0.25)
-        q_new = 0.5 * target_dp * direction
+            direction = np.array([1.0, 0.0, 0.0]) if norm < 1e-12 else direction / norm
+        # Increase separation: target dp so that |r||p| is comfortably above threshold
+        dr = float(np.linalg.norm(positions[i] - positions[j]))
+        target_dp = (float(threshold) + 0.5) / max(dr, 0.25) * HBAR_C
+        q_new = 0.5 * np.clip(target_dp, dp, 2.0 * dp + 100.0) * direction
         momenta[i] = p_cm + q_new
         momenta[j] = p_cm - q_new
         corrections += 1
 
     if corrections:
-        momenta = momenta - np.mean(momenta, axis=0)
+        momenta -= np.mean(momenta, axis=0)
         kinetic_after = float(np.sum(momenta * momenta))
         if kinetic_before > 0.0 and kinetic_after > 0.0:
             momenta *= np.sqrt(kinetic_before / kinetic_after)
