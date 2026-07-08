@@ -282,6 +282,11 @@ def run_imqmd_event(
         use_static_stabilizer=False,
         use_grid_edf=use_grid_edf,
     )
+    # ponytail: 100 fm/c cooling to reduce fragment multiplicity
+    propagate(system, dt=float(dt), n_steps=50, sample_every=1000,
+              with_collisions=False, remove_cm_drift=False,
+              use_surface_term=True, use_static_stabilizer=False,
+              use_grid_edf=use_grid_edf)
     fragments = identify_fragments(
         system,
         method=fragment_method,
