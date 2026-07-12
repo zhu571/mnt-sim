@@ -24,6 +24,8 @@ class EventFragmentRecord:
     excitation_energy: float
     final_Z: int
     final_A: int
+    e_lab: float = 0.0
+    theta_lab: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ class CrossSectionScanResult:
     impact_parameter_results: tuple[ImpactParameterResult, ...]
     dsigma_dz: dict[int, float]
     total_cross_section: float
+    d2sigma: tuple | None = None  # (theta_grid, e_grid, array)
 
 
 @lru_cache(maxsize=32)
@@ -296,7 +299,20 @@ def run_imqmd_event(
         iso_r_cut_np=iso_r_cut_np,
     )
     decay_rng = np.random.default_rng(int(decay_seed + 1000 * seed_offset))
-    records = tuple(_record_fragment(fragment, decay_rng, use_hivap=use_hivap) for fragment in fragments)
+    # Two-body kinematics: fragment lab energy and angle
+    v_cm = np.array([np.sqrt(2.0 * energy_per_a * M_N) * projectile_a / (projectile_a + target_a), 0.0, 0.0])
+    raw_records = []
+    for fragment in fragments:
+        rec = _record_fragment(fragment, decay_rng, use_hivap=use_hivap)
+        v_f_cm = fragment.momentum / (fragment.A * M_N)
+        v_lab = v_cm + v_f_cm
+        e_lab = 0.5 * fragment.A * M_N * np.dot(v_lab, v_lab)
+        theta_lab = np.degrees(np.arctan2(np.linalg.norm(v_lab[1:]), v_lab[0]))
+        raw_records.append(EventFragmentRecord(
+            Z=rec.Z, A=rec.A, excitation_energy=rec.excitation_energy,
+            final_Z=rec.final_Z, final_A=rec.final_A,
+            e_lab=float(e_lab), theta_lab=float(theta_lab)))
+    records = tuple(raw_records)
     collision_stats = getattr(system, "collision_stats", {})
     return ImpactParameterEvent(
         b=float(impact_parameter),
@@ -407,6 +423,11 @@ def impact_parameter_scan(
     sigma_total_by_z: dict[int, float] = defaultdict(float)
     total_cross_section = 0.0
 
+    # ponytail: d2sigma binning
+    theta_grid = np.linspace(0, 90, 46)
+    e_grid = np.linspace(0, 1500, 51)
+    d2 = np.zeros((45, 50), dtype=float)
+
     for b, width in zip(b_values, widths):
         events = sorted(by_b.get(float(b), []), key=lambda item: item.event_index)
         sigma_by_z: dict[int, float] = defaultdict(float)
@@ -417,6 +438,10 @@ def impact_parameter_scan(
                     sigma_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_z[int(fragment.final_Z)] += weight
                     total_cross_section += weight
+                    if fragment.e_lab > 0 and 0 <= fragment.theta_lab <= 90:
+                        it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 44)
+                        ie = np.clip(np.digitize(fragment.e_lab, e_grid) - 1, 0, 49)
+                        d2[it, ie] += weight
         ordered_results.append(
             ImpactParameterResult(
                 b=float(b),
@@ -428,6 +453,7 @@ def impact_parameter_scan(
             )
         )
 
+    d2sigma = (tuple(theta_grid.tolist()), tuple(e_grid.tolist()), tuple(d2.ravel().tolist()))
     return CrossSectionScanResult(
         projectile=(int(projectile_z), int(projectile_a)),
         target=(int(target_z), int(target_a)),
@@ -437,6 +463,7 @@ def impact_parameter_scan(
         impact_parameter_results=tuple(ordered_results),
         dsigma_dz=dict(sorted(sigma_total_by_z.items())),
         total_cross_section=float(total_cross_section),
+        d2sigma=d2sigma,
     )
 
 
