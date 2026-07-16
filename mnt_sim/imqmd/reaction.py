@@ -58,6 +58,7 @@ class CrossSectionScanResult:
     dsigma_dz: dict[int, float]
     total_cross_section: float
     dsigma_da: dict = None  # ponytail: mass distribution, populated post-init
+    dsigma_za: dict = None  # ponytail: isotope yield {(Z,A): sigma}
     d2sigma: tuple | None = None  # (theta_grid, e_grid, array)
 
 
@@ -423,6 +424,7 @@ def impact_parameter_scan(
     ordered_results: list[ImpactParameterResult] = []
     sigma_total_by_z: dict[int, float] = defaultdict(float)
     sigma_total_by_a: dict[int, float] = defaultdict(float)
+    sigma_total_by_za: dict[tuple, float] = defaultdict(float)
     total_cross_section = 0.0
 
     # ponytail: d2sigma binning
@@ -440,6 +442,7 @@ def impact_parameter_scan(
                     sigma_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_a[int(fragment.final_A)] += weight
+                    sigma_total_by_za[(int(fragment.final_Z), int(fragment.final_A))] += weight
                     total_cross_section += weight
                     if fragment.e_lab > 0 and 0 <= fragment.theta_lab <= 90:
                         it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 44)
@@ -467,6 +470,7 @@ def impact_parameter_scan(
         dsigma_dz=dict(sorted(sigma_total_by_z.items())),
         total_cross_section=float(total_cross_section),
         dsigma_da=dict(sorted(sigma_total_by_a.items())),
+        dsigma_za={f"{z},{a}": float(s) for (z,a),s in sigma_total_by_za.items()},
         d2sigma=d2sigma,
     )
 
