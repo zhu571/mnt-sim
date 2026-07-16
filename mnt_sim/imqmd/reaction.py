@@ -57,6 +57,7 @@ class CrossSectionScanResult:
     impact_parameter_results: tuple[ImpactParameterResult, ...]
     dsigma_dz: dict[int, float]
     total_cross_section: float
+    dsigma_da: dict = None  # ponytail: mass distribution, populated post-init
     d2sigma: tuple | None = None  # (theta_grid, e_grid, array)
 
 
@@ -421,6 +422,7 @@ def impact_parameter_scan(
         by_b[float(result.b)].append(result)
     ordered_results: list[ImpactParameterResult] = []
     sigma_total_by_z: dict[int, float] = defaultdict(float)
+    sigma_total_by_a: dict[int, float] = defaultdict(float)
     total_cross_section = 0.0
 
     # ponytail: d2sigma binning
@@ -437,6 +439,7 @@ def impact_parameter_scan(
                 for fragment in event.primary_fragments:
                     sigma_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_z[int(fragment.final_Z)] += weight
+                    sigma_total_by_a[int(fragment.final_A)] += weight
                     total_cross_section += weight
                     if fragment.e_lab > 0 and 0 <= fragment.theta_lab <= 90:
                         it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 44)
@@ -463,6 +466,7 @@ def impact_parameter_scan(
         impact_parameter_results=tuple(ordered_results),
         dsigma_dz=dict(sorted(sigma_total_by_z.items())),
         total_cross_section=float(total_cross_section),
+        dsigma_da=dict(sorted(sigma_total_by_a.items())),
         d2sigma=d2sigma,
     )
 
