@@ -302,7 +302,7 @@ def run_imqmd_event(
     )
     decay_rng = np.random.default_rng(int(decay_seed + 1000 * seed_offset))
     # Two-body kinematics: fragment lab energy and angle
-    v_cm = np.array([np.sqrt(2.0 * energy_per_a * M_N) * projectile_a / (projectile_a + target_a), 0.0, 0.0])
+    v_cm = np.array([np.sqrt(2.0 * energy_per_a * M_N) * (projectile_a - target_a) / ((projectile_a + target_a) * M_N), 0.0, 0.0])
     raw_records = []
     for fragment in fragments:
         rec = _record_fragment(fragment, decay_rng, use_hivap=use_hivap)
