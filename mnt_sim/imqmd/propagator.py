@@ -290,8 +290,13 @@ def propagate(
         sample_every = max(1, n_steps // 200)
     collision_interval = 1
     if apply_fermi_constraint is None:
-        apply_fermi_constraint = not with_collisions  # off during collisions
-    fermi_threshold = 255.0
+        # Always apply, including during collisions.  The CoMD-style momentum
+        # swap in fermi_constraint_check conserves energy exactly, so the
+        # commit-4e747a0 workaround (disabling the constraint with collisions
+        # on, which let the overlap zone thermalize into a nucleon soup) is
+        # no longer needed.
+        apply_fermi_constraint = True
+    fermi_threshold = 1.0  # Wigner occupation threshold (CoMD standard)
     fermi_time = 20.0 if use_static_stabilizer else 5.0
     fermi_interval = max(1, int(round(fermi_time / float(dt))))
     if collision_dt is not None:

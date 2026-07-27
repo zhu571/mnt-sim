@@ -153,12 +153,14 @@ def _occupation_wigner_fast(
     is_proton: np.ndarray,
     sigma_r: float,
     exclude: tuple[int, int],
+    width_scale: float = 1.0,
 ) -> float:
     same_species = is_proton == bool(is_proton_i)
     same_species[list(exclude)] = False
     if not np.any(same_species):
         return 0.0
 
+    sigma_r = sigma_r * width_scale
     sigma_p = HBAR_C / (2.0 * sigma_r)
     dr2 = np.sum((positions[same_species] - r_i) ** 2, axis=1)
     dp2 = np.sum((momenta[same_species] - p_final) ** 2, axis=1)
@@ -181,7 +183,16 @@ def _pauli_blocking_probability_fast(
     rho_n: np.ndarray,
     rho_p: np.ndarray,
     sigma_r: float,
+    width_scale: float = 1.35,
 ) -> float:
+    # Broadened Wigner kernel (same 1.35 factor as pauli_blocking_probability_v2,
+    # "Chen-2024-inspired").  The fixed packet width sigma_r≈1.06 fm is much
+    # narrower than the interparticle spacing at rho0, so the unbroadened
+    # kernel systematically underestimates the occupation of Fermi-sea final
+    # states.  That leaked ~6% of attempted NN scatterings at near-barrier
+    # energies (1.0e4 accepted in one U+U event), thermalizing the system
+    # into multifragmentation.  The broadened kernel restores blocking for
+    # in-sea final states while leaving genuinely empty states open.
     p_i = _occupation_wigner_fast(
         positions[i],
         np.asarray(p3, dtype=float),
@@ -191,6 +202,7 @@ def _pauli_blocking_probability_fast(
         is_proton,
         sigma_r,
         (i, j),
+        width_scale,
     )
     p_j = _occupation_wigner_fast(
         positions[j],
@@ -201,6 +213,7 @@ def _pauli_blocking_probability_fast(
         is_proton,
         sigma_r,
         (i, j),
+        width_scale,
     )
     return float(np.clip(1.0 - (1.0 - p_i) * (1.0 - p_j), 0.0, 1.0))
 
@@ -409,10 +422,19 @@ def fermi_constraint_check(
     """Apply the CoMD phase-space occupation constraint (Papa & Bonasera 2001).
 
     Computes the Wigner occupation f_i for each nucleon from same-species
-    neighbours.  If f_i > threshold (default 1.0, corresponding to one
-    spin-degenerate state per phase-space cell h³/4), the nucleon and its
-    nearest same-group neighbour exchange relative momentum to reduce the
-    occupancy.
+    neighbours.  For every nucleon with f_i > ``threshold`` (default 1.0,
+    one spin-degenerate state per phase-space cell h³/4) the routine searches
+    nearby same-species (same-group) partners and performs the momentum swap
+    p_i ↔ p_j that gives the largest decrease of f_i + f_j.
+
+    A momentum swap only relabels momenta inside the same-species set, so
+    total momentum and total kinetic energy are conserved exactly.  This is
+    what makes the constraint safe during the collision stage: the previous
+    momentum-*stretch* variant injected energy with every correction (then
+    rescaled it away globally), which heated the system and drove U+U into
+    multifragmentation — the reason the constraint was disabled in commit
+    4e747a0.  With swaps the constraint can stay enabled and suppress the
+    unphysical over-occupation of phase space (nucleon soup).
 
     When ``group_ids`` is provided, only same-group nucleons contribute
     to the occupation, allowing natural nucleon exchange across groups
@@ -427,66 +449,79 @@ def fermi_constraint_check(
         (A,) integer array grouping nucleons.  Nucleons in different
         groups never constrain each other.
     """
-    rng = _rng(nucleus)
-    positions = nucleus.positions
-    momenta = nucleus.momenta
-    kinetic_before = float(np.sum(momenta * momenta))
-    corrections = 0
     if nucleus.A < 2:
         return 0
 
+    positions = nucleus.positions
+    momenta = nucleus.momenta.copy()
+    is_proton = nucleus.is_proton
+    sigma_r = nucleus.sigma_r
+    sigma_p = HBAR_C / (2.0 * sigma_r)
+
+    def _occupation_at(r: np.ndarray, p: np.ndarray, mask: np.ndarray, skip: tuple[int, ...]) -> float:
+        m = mask.copy()
+        m[list(skip)] = False
+        if not np.any(m):
+            return 0.0
+        dr2 = np.sum((positions[m] - r) ** 2, axis=1)
+        dp2 = np.sum((momenta[m] - p) ** 2, axis=1)
+        weights = np.exp(-dr2 / (2.0 * sigma_r**2) - dp2 / (2.0 * sigma_p**2))
+        # ps_cell * wigner_norm = (2πħ)³/4 · 1/(πħ)³ = 2 (see _compute_occupation_field)
+        return float(2.0 * np.sum(weights))
+
     occupations = _compute_occupation_field(nucleus, group_ids)
-    # Dynamic threshold: Gaussian packets overestimate occupation in heavy
-    # nuclei (U238: mean 2.6, max 6.0 with sigma_r=1.1 fm).  Only constrain
-    # nucleons whose occupation is significantly above the median.
-    median_occ = float(np.median(occupations))
-    effective_threshold = max(float(threshold), median_occ + 1.0)
-    violating = np.flatnonzero(occupations > effective_threshold)
+    # Most-occupied first so the worst violations are resolved before the
+    # field is distorted by earlier swaps.
+    violating = np.flatnonzero(occupations > float(threshold))
+    violating = violating[np.argsort(occupations[violating])[::-1]]
     if len(violating) == 0:
         return 0
 
-    # For each violating nucleon, find nearest same-group same-species neighbour
-    is_proton = nucleus.is_proton
+    corrections = 0
+    spatial_cut2 = (4.0 * sigma_r) ** 2  # Wigner spatial kernel is dead beyond 4σ
+    max_candidates = 8
     for i in violating:
+        i = int(i)
         if group_ids is not None:
-            candidates = np.flatnonzero(
-                (is_proton == is_proton[i]) & (group_ids == group_ids[i])
-            )
+            mask = (is_proton == is_proton[i]) & (group_ids == group_ids[i])
         else:
-            candidates = np.flatnonzero(is_proton == is_proton[i])
+            mask = is_proton == is_proton[i]
+        candidates = np.flatnonzero(mask)
         candidates = candidates[candidates != i]
         if len(candidates) == 0:
             continue
+        # Only nearby partners couple through the spatial Wigner kernel.
+        dists2 = np.sum((positions[candidates] - positions[i]) ** 2, axis=1)
+        candidates = candidates[dists2 <= spatial_cut2]
+        if len(candidates) == 0:
+            continue
+        # Cheap pre-selection: a partner whose momentum is far from the
+        # violating (clustered) momentum p_i maximizes the expected
+        # occupation decrease; exact evaluation only for the best few.
+        dp_mag = np.sum((momenta[candidates] - momenta[i]) ** 2, axis=1)
+        if len(candidates) > max_candidates:
+            candidates = candidates[np.argsort(dp_mag)[::-1][:max_candidates]]
 
-        dists = np.sum((positions[candidates] - positions[i]) ** 2, axis=1)
-        j = candidates[np.argmin(dists)]
-
-        p_i = momenta[i].copy()
-        p_j = momenta[j].copy()
-        p_cm = 0.5 * (p_i + p_j)
-        dp_vec = p_i - p_j
-        dp = float(np.linalg.norm(dp_vec))
-
-        # Reshuffle relative momentum to increase phase-space separation
-        if dp > 1.0e-12:
-            direction = dp_vec / dp
-        else:
-            direction = rng.normal(size=3)
-            norm = np.linalg.norm(direction)
-            direction = np.array([1.0, 0.0, 0.0]) if norm < 1e-12 else direction / norm
-        # Increase separation: target dp so that |r||p| is comfortably above threshold
-        dr = float(np.linalg.norm(positions[i] - positions[j]))
-        target_dp = (float(threshold) + 0.5) / max(dr, 0.25) * HBAR_C
-        q_new = 0.5 * np.clip(target_dp, dp, 2.0 * dp + 100.0) * direction
-        momenta[i] = p_cm + q_new
-        momenta[j] = p_cm - q_new
+        f_i_old = _occupation_at(positions[i], momenta[i], mask, (i,))
+        best_j = -1
+        best_delta = 1.0e-6  # require a strict decrease of f_i + f_j
+        for j in candidates:
+            j = int(j)
+            f_j_old = _occupation_at(positions[j], momenta[j], mask, (j,))
+            f_i_new = _occupation_at(positions[i], momenta[j], mask, (i, j))
+            f_j_new = _occupation_at(positions[j], momenta[i], mask, (i, j))
+            delta = (f_i_old + f_j_old) - (f_i_new + f_j_new)
+            if delta > best_delta:
+                best_delta = delta
+                best_j = j
+        if best_j < 0:
+            continue
+        momenta[[i, best_j]] = momenta[[best_j, i]]
         corrections += 1
 
     if corrections:
-        momenta -= np.mean(momenta, axis=0)
-        kinetic_after = float(np.sum(momenta * momenta))
-        if kinetic_before > 0.0 and kinetic_after > 0.0:
-            momenta *= np.sqrt(kinetic_before / kinetic_after)
+        # Swaps conserve Σp and Σp² exactly; no CM subtraction or kinetic
+        # rescaling (the old variant needed both — that was the energy leak).
         nucleus.momenta = momenta
     return corrections
 

@@ -67,10 +67,20 @@ class GridEDF:
         At collision overlap densities (ρ>ρ₀) the repulsive EOS must not be
         softened by the nuclear_scale calibration.  Only ρ>ρ₀ is affected;
         the surface and bulk at normal density keep the calibrated scale.
+
+        The ramp is deliberately mild (slope 4, centred at 2ρ₀): the previous
+        steep ramp (slope 8 at 1.5ρ₀) restored full-strength repulsion already
+        in the first overlap stage.  Combined with the weak calibrated
+        attraction at ρ≤ρ₀ (nuclear_scale≈0.65 for 238U), that stiff bounce
+        sprayed nucleons faster than the softened field could rebind them —
+        a driver of the spurious U+U multifragmentation.  Centring the
+        transition at 2ρ₀ keeps the density range actually probed in
+        near-barrier reactions (ρ≲2ρ₀ at E/A≈7 MeV) close to the calibrated
+        EOS, so the density dependence during the collision stage is gentler.
         """
         x = np.clip(np.asarray(rho, dtype=float) / self.parameters.rho0, 1.0, None)
-        # Sigmoid: 0 at x=1, 0.5 at x=1.5, ~1 at x=2.5
-        ramp = 1.0 / (1.0 + np.exp(-8.0 * (x - 1.5)))
+        # Sigmoid: 0 at x=1, ~0.12 at x=1.5, 0.5 at x=2, ~0.88 at x=2.5
+        ramp = 1.0 / (1.0 + np.exp(-4.0 * (x - 2.0)))
         return self.nuclear_scale + (1.0 - self.nuclear_scale) * ramp
 
     def build(self, positions: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[int, int, int]]:

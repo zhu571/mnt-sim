@@ -56,7 +56,7 @@
 | σ_r | 1.1 fm | — |
 | MST | 3.5 fm / 250 MeV/c | Z2012 |
 | iso-MST nn/np/pp | 6.0/6.0/3.0 fm | iso-MST-R |
-| Fermi | 170 | CoMD |
+| Fermi | 1.0（Wigner 占据数阈值，CoMD 动量交换，能量守恒） | CoMD |
 | 弛豫 | 800 fm/c | — |
 | 表面力 | ON | 物理 |
 | 静态弹簧 | OFF | 反应模式 |

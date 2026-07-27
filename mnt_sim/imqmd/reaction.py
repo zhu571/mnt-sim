@@ -16,6 +16,13 @@ from .nucleus import GaussianPacket, ImQMDNucleus
 from .propagator import propagate
 from .skyrme import M_N, SkyrmeEDF
 
+# Fragments with Z <= 2 (p, n, d, t, 3He, alpha) are evaporated light
+# particles: they are counted as per-event yields, not as fragment
+# production cross sections.  Mixing them into dsigma/dZ gave e.g.
+# "sigma(Z=0)" a huge multiplicity-weighted value with no cross-section
+# meaning (audit of the 238U+238U @ 7 MeV/A scan).
+LIGHT_FRAGMENT_Z_MAX = 2
+
 
 @dataclass(frozen=True)
 class EventFragmentRecord:
@@ -45,6 +52,7 @@ class ImpactParameterResult:
     events: tuple[ImpactParameterEvent, ...]
     sigma_by_z: dict[int, float]
     total_sigma: float
+    light_yield_by_z: dict[int, float] = None  # Z<=2 particles, separate from fragment sigma
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,7 @@ class CrossSectionScanResult:
     dsigma_da: dict = None  # ponytail: mass distribution, populated post-init
     dsigma_za: dict = None  # ponytail: isotope yield {(Z,A): sigma}
     d2sigma: tuple | None = None  # (theta_grid, e_grid, array)
+    dsigma_dz_light: dict = None  # Z<=2 light-particle yield, kept out of dsigma_dz
 
 
 @lru_cache(maxsize=32)
@@ -125,7 +134,17 @@ def make_collision_event(
     edf = edf or projectile.edf
     projectile.edf = edf
     target.edf = edf
-    p_beam = float(np.sqrt(2.0 * M_N * float(energy_per_a)))
+    # energy_per_a is the LAB beam energy per nucleon.  In the CM frame each
+    # nucleus carries the lab momentum per nucleon scaled by the PARTNER's
+    # mass fraction (symmetric systems: half).  Handing the raw lab momentum
+    # to both nuclei puts 4x the intended energy into the CM for U+U
+    # (E_cm = 3332 MeV instead of 833 MeV, i.e. a 28 MeV/A-equivalent
+    # collision), which turned an intended near-barrier reaction into
+    # violent multifragmentation.
+    p_lab = float(np.sqrt(2.0 * M_N * float(energy_per_a)))
+    a_total = float(projectile_a + target_a)
+    p_proj = p_lab * float(target_a) / a_total
+    p_targ = p_lab * float(projectile_a) / a_total
 
     packets: list[GaussianPacket] = []
     reference_positions: list[np.ndarray] = []
@@ -136,7 +155,7 @@ def make_collision_event(
         packets.append(
             GaussianPacket(
                 packet.r_i + shift,
-                packet.p_i + np.array([p_beam, 0.0, 0.0]),
+                packet.p_i + np.array([p_proj, 0.0, 0.0]),
                 packet.sigma_r,
                 packet.is_proton,
             )
@@ -149,7 +168,7 @@ def make_collision_event(
         packets.append(
             GaussianPacket(
                 packet.r_i + shift,
-                packet.p_i + np.array([-p_beam, 0.0, 0.0]),
+                packet.p_i + np.array([-p_targ, 0.0, 0.0]),
                 packet.sigma_r,
                 packet.is_proton,
             )
@@ -287,8 +306,12 @@ def run_imqmd_event(
         use_static_stabilizer=False,
         use_grid_edf=use_grid_edf,
     )
-    # ponytail: 100 fm/c cooling to reduce fragment multiplicity
-    propagate(system, dt=float(dt), n_steps=50, sample_every=1000,
+    # 250 fm/c collisionless cooling before fragment recognition (was
+    # 50 fm/c).  The short cooling left the system hot, inflating the MST
+    # fragment multiplicity; the longer cooling lets the dinuclear
+    # configuration re-separate and damps internal motion.
+    cooling_steps = max(1, int(round(250.0 / float(dt))))
+    propagate(system, dt=float(dt), n_steps=cooling_steps, sample_every=cooling_steps + 1,
               with_collisions=False, remove_cm_drift=False,
               use_surface_term=True, use_static_stabilizer=False,
               use_grid_edf=use_grid_edf)
@@ -301,8 +324,10 @@ def run_imqmd_event(
         iso_r_cut_np=iso_r_cut_np,
     )
     decay_rng = np.random.default_rng(int(decay_seed + 1000 * seed_offset))
-    # Two-body kinematics: fragment lab energy and angle
-    v_cm = np.array([np.sqrt(2.0 * energy_per_a * M_N) * (projectile_a - target_a) / ((projectile_a + target_a) * M_N), 0.0, 0.0])
+    # Two-body kinematics: fragment lab energy and angle.  The simulation
+    # frame is the CM frame (total momentum zero); the lab frame moves at
+    # V_cm = A_p * p_lab / (M_total) along +x.
+    v_cm = np.array([np.sqrt(2.0 * energy_per_a * M_N) * projectile_a / ((projectile_a + target_a) * M_N), 0.0, 0.0])
     raw_records = []
     for fragment in fragments:
         rec = _record_fragment(fragment, decay_rng, use_hivap=use_hivap)
@@ -341,6 +366,27 @@ def _b_bin_widths(b_values: np.ndarray, b_max: float) -> np.ndarray:
 
 def _worker_run_event(kwargs: dict[str, object]) -> ImpactParameterEvent:
     return run_imqmd_event(**kwargs)
+
+
+def _is_reactive_event(
+    heavy_za: list[tuple[int, int]],
+    projectile_z: int,
+    projectile_a: int,
+    target_z: int,
+    target_a: int,
+) -> bool:
+    """Return False only when the entrance channel survives the event intact.
+
+    An event is elastic-like (non-reactive) only if exactly the two original
+    nuclei re-emerge unchanged; any transfer, nucleon loss, or breakup counts
+    as a reaction.  sigma_R must be built from this per-event reaction
+    probability (2*pi*b*db * P_R), not from fragment-count weights.
+    """
+
+    if len(heavy_za) != 2:
+        return True
+    entrance = sorted([(int(projectile_z), int(projectile_a)), (int(target_z), int(target_a))])
+    return sorted(heavy_za) != entrance
 
 
 def impact_parameter_scan(
@@ -425,29 +471,48 @@ def impact_parameter_scan(
     sigma_total_by_z: dict[int, float] = defaultdict(float)
     sigma_total_by_a: dict[int, float] = defaultdict(float)
     sigma_total_by_za: dict[tuple, float] = defaultdict(float)
-    total_cross_section = 0.0
+    sigma_light_by_z: dict[int, float] = defaultdict(float)
+    sigma_reaction = 0.0
 
-    # ponytail: d2sigma binning
-    theta_grid = np.linspace(0, 90, 46)
-    e_grid = np.linspace(0, 1500, 51)
-    d2 = np.zeros((45, 50), dtype=float)
+    # d2sigma binning for heavy (MNT) products.  The full angular range is
+    # kept — theta_lab > 90 deg is physical backward scattering — and the
+    # energy grid reaches 2000 MeV so the quasi-elastic peak
+    # (~7 MeV/A * 238 = 1666 MeV minus TKE loss) is not truncated.
+    theta_grid = np.linspace(0.0, 180.0, 91)
+    e_grid = np.linspace(0.0, 2000.0, 81)
+    d2 = np.zeros((90, 80), dtype=float)
 
     for b, width in zip(b_values, widths):
         events = sorted(by_b.get(float(b), []), key=lambda item: item.event_index)
         sigma_by_z: dict[int, float] = defaultdict(float)
+        light_by_z: dict[int, float] = defaultdict(float)
         if events:
             weight = 2.0 * np.pi * float(b) * float(width) / float(len(events))
             for event in events:
-                for fragment in event.primary_fragments:
+                heavy = [f for f in event.primary_fragments if int(f.final_Z) > LIGHT_FRAGMENT_Z_MAX]
+                if _is_reactive_event(
+                    [(int(f.final_Z), int(f.final_A)) for f in heavy],
+                    projectile_z,
+                    projectile_a,
+                    target_z,
+                    target_a,
+                ):
+                    sigma_reaction += weight
+                for fragment in heavy:
                     sigma_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_a[int(fragment.final_A)] += weight
                     sigma_total_by_za[(int(fragment.final_Z), int(fragment.final_A))] += weight
-                    total_cross_section += weight
-                    if fragment.e_lab > 0 and 0 <= fragment.theta_lab <= 90:
-                        it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 44)
-                        ie = np.clip(np.digitize(fragment.e_lab, e_grid) - 1, 0, 49)
+                    if fragment.e_lab > 0:
+                        it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 89)
+                        ie = np.clip(np.digitize(fragment.e_lab, e_grid) - 1, 0, 79)
                         d2[it, ie] += weight
+                # Light particles (Z<=2) are tracked separately as yields.
+                for fragment in event.primary_fragments:
+                    if int(fragment.final_Z) <= LIGHT_FRAGMENT_Z_MAX:
+                        z = int(fragment.final_Z)
+                        light_by_z[z] += weight
+                        sigma_light_by_z[z] += weight
         ordered_results.append(
             ImpactParameterResult(
                 b=float(b),
@@ -456,6 +521,7 @@ def impact_parameter_scan(
                 events=tuple(events),
                 sigma_by_z=dict(sorted(sigma_by_z.items())),
                 total_sigma=float(sum(sigma_by_z.values())),
+                light_yield_by_z=dict(sorted(light_by_z.items())),
             )
         )
 
@@ -468,10 +534,12 @@ def impact_parameter_scan(
         fragment_method=str(fragment_method),
         impact_parameter_results=tuple(ordered_results),
         dsigma_dz=dict(sorted(sigma_total_by_z.items())),
-        total_cross_section=float(total_cross_section),
+        # sigma_R from the reaction probability, not fragment-count weights.
+        total_cross_section=float(sigma_reaction),
         dsigma_da=dict(sorted(sigma_total_by_a.items())),
         dsigma_za={f"{z},{a}": float(s) for (z,a),s in sigma_total_by_za.items()},
         d2sigma=d2sigma,
+        dsigma_dz_light=dict(sorted(sigma_light_by_z.items())),
     )
 
 
