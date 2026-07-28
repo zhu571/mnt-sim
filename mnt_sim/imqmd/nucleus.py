@@ -68,6 +68,18 @@ class ImQMDNucleus:
     def sigma_r(self) -> float:
         return float(self.packets[0].sigma_r) if self.packets else 1.1
 
+    @property
+    def packet_sigmas(self) -> np.ndarray:
+        """Per-packet wave packet widths (Wang 2002 Eq. (18): σ_r depends on A).
+
+        Projectile and target nuclei are relaxed with their own
+        σ_r = σ0 + σ1·A^(1/3); the combined system must keep the per-packet
+        values (essential for asymmetric systems), so density deposition,
+        EDF forces and Wigner kernels all consume this array.
+        """
+
+        return np.array([p.sigma_r for p in self.packets], dtype=float)
+
     def copy(self) -> "ImQMDNucleus":
         packets = [
             GaussianPacket(p.r_i.copy(), p.p_i.copy(), p.sigma_r, p.is_proton)
@@ -87,9 +99,11 @@ class ImQMDNucleus:
 
         points = np.atleast_2d(np.asarray(r, dtype=float))
         pos = self.positions
+        sigmas = self.packet_sigmas
         diff = points[:, None, :] - pos[None, :, :]
-        norm = 1.0 / ((2.0 * np.pi * self.sigma_r**2) ** 1.5)
-        weights = norm * np.exp(-np.sum(diff * diff, axis=-1) / (2.0 * self.sigma_r**2))
+        # Per-packet Gaussian normalization/width (system-size-dependent σ_r).
+        norm = 1.0 / ((2.0 * np.pi * sigmas**2) ** 1.5)
+        weights = norm[None, :] * np.exp(-np.sum(diff * diff, axis=-1) / (2.0 * sigmas[None, :] ** 2))
         protons = self.is_proton
         rho_p = np.sum(weights[:, protons], axis=1)
         rho_n = np.sum(weights[:, ~protons], axis=1)
@@ -109,7 +123,14 @@ class ImQMDNucleus:
         use_surface_term: bool | None = None,
         use_static_stabilizer: bool | None = None,
     ) -> dict[str, float]:
-        """Return kinetic, potential, Coulomb, symmetry, and total energies."""
+        """Return kinetic, potential, Coulomb, symmetry, and total energies.
+
+        DEPRECATED (legacy centroid path): this compact centroid-sampled EDF
+        (including the pair-form surface terms) is kept for static tests and
+        diagnostics.  Production energies/forces use the GridEDF path
+        (``total_energy`` / ``propagator._snapshot``), which is the
+        self-consistent implementation.
+        """
 
         if use_surface_term is None:
             use_surface_term = bool(getattr(self, "use_surface_term", True))
@@ -153,7 +174,7 @@ class ImQMDNucleus:
 
         grid = GridEDF(
             self.edf.parameters,
-            self.sigma_r,
+            self.packet_sigmas,
             grid_spacing=1.0,
             nuclear_scale=float(getattr(self, "grid_nuclear_scale", 1.0)),
         )
@@ -177,14 +198,16 @@ class ImQMDNucleus:
         """Return proton and neutron RMS radii, including packet width."""
 
         pos = self.positions
+        sigmas = self.packet_sigmas
         mask = self.is_proton
 
-        def rms(subset: np.ndarray) -> float:
+        def rms(subset: np.ndarray, subset_sigmas: np.ndarray) -> float:
             if len(subset) == 0:
                 return 0.0
-            return float(np.sqrt(np.mean(np.sum(subset * subset, axis=1)) + 3.0 * self.sigma_r**2))
+            # Packet-width correction uses each packet's own σ_r.
+            return float(np.sqrt(np.mean(np.sum(subset * subset, axis=1)) + 3.0 * np.mean(subset_sigmas**2)))
 
-        return rms(pos[mask]), rms(pos[~mask])
+        return rms(pos[mask], sigmas[mask]), rms(pos[~mask], sigmas[~mask])
 
     def max_radius(self) -> float:
         return float(np.max(np.linalg.norm(self.positions, axis=1)))

@@ -53,6 +53,8 @@ class ImpactParameterResult:
     sigma_by_z: dict[int, float]
     total_sigma: float
     light_yield_by_z: dict[int, float] = None  # Z<=2 particles, separate from fragment sigma
+    sigma_by_z_err: dict[int, float] = None  # Poisson errors, delta_sigma = sigma/sqrt(N)
+    total_sigma_err: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,8 @@ class CrossSectionScanResult:
     dsigma_za: dict = None  # ponytail: isotope yield {(Z,A): sigma}
     d2sigma: tuple | None = None  # (theta_grid, e_grid, array)
     dsigma_dz_light: dict = None  # Z<=2 light-particle yield, kept out of dsigma_dz
+    dsigma_dz_err: dict = None  # Poisson error per Z: sqrt(sum_b w_b^2 * n_Z(b))
+    total_cross_section_err: float = 0.0  # Poisson error on sigma_R
 
 
 @lru_cache(maxsize=32)
@@ -77,7 +81,7 @@ def _relaxed_template(
     A: int,
     sigma_r: float,
     seed: int,
-    relax_time: float,
+    relax_time: float | None,
 ) -> ImQMDNucleus:
     return initialize_and_relax(Z, A, sigma_r=sigma_r, seed=seed, relax_time=relax_time)
 
@@ -87,7 +91,7 @@ def _prepared_nucleus(
     A: int,
     sigma_r: float,
     seed: int,
-    relax_time: float,
+    relax_time: float | None,
     edf: SkyrmeEDF | None,
 ) -> ImQMDNucleus:
     if edf is None:
@@ -106,9 +110,33 @@ def estimate_grazing_bmax(projectile_z: int, projectile_a: int, target_z: int, t
 
 
 def collision_separation(projectile_z: int, projectile_a: int, target_z: int, target_a: int) -> float:
-    """Return a practical initial center-to-center separation in fm."""
+    """Return the initial center-to-center separation in fm.
 
-    return float(max(28.0, estimate_grazing_bmax(projectile_z, projectile_a, target_z, target_a) + 16.0))
+    Research report Sec. 4.2: the initial separation is 50 fm so that the two
+    nuclei start with no measurable interaction (Gaussian packet tails at
+    ~25 fm from each center are zero to machine precision; Coulomb at 50 fm
+    is still included by the propagation, which is physical).  The geometric
+    grazing estimate only matters if it would exceed 50 fm.
+    """
+
+    return float(max(50.0, estimate_grazing_bmax(projectile_z, projectile_a, target_z, target_a) + 16.0))
+
+
+def _random_rotation_matrix(rng: np.random.Generator) -> np.ndarray:
+    """Uniform random rotation on SO(3) (QR of a Gaussian matrix, Mezzadri 2007).
+
+    Used to rotate each collision partner around its own center of mass by
+    random Euler angles before boost (report Sec. 4.2).  Mandatory for
+    deformed nuclei such as 238U, where a fixed orientation would bias the
+    reaction dynamics.
+    """
+
+    m = rng.normal(size=(3, 3))
+    q, r = np.linalg.qr(m)
+    q = q @ np.diag(np.sign(np.diag(r)))
+    if np.linalg.det(q) < 0.0:
+        q[:, 0] = -q[:, 0]
+    return q
 
 
 def make_collision_event(
@@ -123,14 +151,21 @@ def make_collision_event(
     collision_seed: int,
     separation: float | None = None,
     sigma_r: float = 1.1,
-    relax_time: float = 800.0,
+    relax_time: float | None = None,
     edf: SkyrmeEDF | None = None,
 ) -> ImQMDNucleus:
-    """Build a two-nucleus ImQMD event for a given impact parameter."""
+    """Build a two-nucleus ImQMD event for a given impact parameter.
+
+    Both nuclei are rotated around their own centers of mass by uniform
+    random Euler angles (report Sec. 4.2; required for deformed nuclei like
+    238U) before being placed at ``separation`` (default 50 fm, no initial
+    interaction).  ``relax_time=None`` uses the A-dependent relaxation
+    default (800 fm/c light, 3000 fm/c heavy).
+    """
 
     separation = collision_separation(projectile_z, projectile_a, target_z, target_a) if separation is None else float(separation)
-    projectile = _prepared_nucleus(projectile_z, projectile_a, float(sigma_r), int(projectile_seed), float(relax_time), edf)
-    target = _prepared_nucleus(target_z, target_a, float(sigma_r), int(target_seed), float(relax_time), edf)
+    projectile = _prepared_nucleus(projectile_z, projectile_a, float(sigma_r), int(projectile_seed), relax_time, edf)
+    target = _prepared_nucleus(target_z, target_a, float(sigma_r), int(target_seed), relax_time, edf)
     edf = edf or projectile.edf
     projectile.edf = edf
     target.edf = edf
@@ -150,30 +185,41 @@ def make_collision_event(
     reference_positions: list[np.ndarray] = []
     reference_group_ids: list[int] = []
 
+    # Random Euler rotation of each partner about its own CM (report Sec.
+    # 4.2); the relaxed nuclei are already CM-centered.  Positions and
+    # momenta rotate together so internal kinematics are unchanged.
+    rotation_rng = np.random.default_rng(int(collision_seed))
+    rotation_p = _random_rotation_matrix(rotation_rng)
+    rotation_t = _random_rotation_matrix(rotation_rng)
+
     for packet in projectile.packets:
         shift = np.array([-0.5 * separation, 0.5 * impact_parameter, 0.0], dtype=float)
+        r_rot = rotation_p @ packet.r_i
+        p_rot = rotation_p @ packet.p_i
         packets.append(
             GaussianPacket(
-                packet.r_i + shift,
-                packet.p_i + np.array([p_proj, 0.0, 0.0]),
+                r_rot + shift,
+                p_rot + np.array([p_proj, 0.0, 0.0]),
                 packet.sigma_r,
                 packet.is_proton,
             )
         )
-        reference_positions.append(packet.r_i + shift)
+        reference_positions.append(r_rot + shift)
         reference_group_ids.append(0)
 
     for packet in target.packets:
         shift = np.array([0.5 * separation, -0.5 * impact_parameter, 0.0], dtype=float)
+        r_rot = rotation_t @ packet.r_i
+        p_rot = rotation_t @ packet.p_i
         packets.append(
             GaussianPacket(
-                packet.r_i + shift,
-                packet.p_i + np.array([-p_targ, 0.0, 0.0]),
+                r_rot + shift,
+                p_rot + np.array([-p_targ, 0.0, 0.0]),
                 packet.sigma_r,
                 packet.is_proton,
             )
         )
-        reference_positions.append(packet.r_i + shift)
+        reference_positions.append(r_rot + shift)
         reference_group_ids.append(1)
 
     system = ImQMDNucleus(
@@ -199,12 +245,17 @@ def make_collision_event(
 def identify_fragments(
     nucleus: ImQMDNucleus,
     method: str = "iso-mst",
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
     iso_r_cut_pp: float = 3.0,
     iso_r_cut_nn: float = 6.0,
     iso_r_cut_np: float = 6.0,
 ) -> list[Fragment]:
-    """Identify primary fragments with MST or iso-MST."""
+    """Identify primary fragments with MST or iso-MST.
+
+    p_cut default 300 MeV/c: MST relative-momentum criterion used by the
+    imQMD MNT studies (research report Sec. 4.5, P_max ~ 300 MeV/c; note the
+    classic QMD MST value is 250 MeV/c, Aichelin 1991 / Zhang 2020 review).
+    """
 
     method = method.lower()
     if method == "iso-mst":
@@ -260,12 +311,12 @@ def run_imqmd_event(
     decay_seed: int = 25000,
     separation: float | None = None,
     sigma_r: float = 1.1,
-    relax_time: float = 800.0,
-    time_fm_c: float = 1000.0,
+    relax_time: float | None = None,
+    time_fm_c: float = 500.0,
     dt: float = 1.0,
     collision_dt: float = 1.0,
     fragment_method: str = "mst",
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
     iso_r_cut_pp: float = 3.0,
     iso_r_cut_nn: float = 6.0,
     iso_r_cut_np: float = 6.0,
@@ -274,7 +325,14 @@ def run_imqmd_event(
     use_grid_edf: bool = True,
     use_hivap: bool = False,
 ) -> ImpactParameterEvent:
-    """Run one ImQMD event through fragment recognition and de-excitation."""
+    """Run one ImQMD event through fragment recognition and de-excitation.
+
+    time_fm_c is the dynamics->statistical-decay switch time; the default
+    500 fm/c follows the imQMD+GEMINI/HIVAP optimum found in the MNT studies
+    (research report Sec. 4.6): primary fragments are formed but still
+    excited.  relax_time=None selects the A-dependent default (800/3000
+    fm/c, report Sec. 4.2).
+    """
 
     seed_offset = int(event_index + round(10.0 * impact_parameter))
     projectile_seed_value = int(projectile_seed + 1000 * seed_offset) if resample_initial_nuclei else int(projectile_seed)
@@ -309,7 +367,9 @@ def run_imqmd_event(
     # 250 fm/c collisionless cooling before fragment recognition (was
     # 50 fm/c).  The short cooling left the system hot, inflating the MST
     # fragment multiplicity; the longer cooling lets the dinuclear
-    # configuration re-separate and damps internal motion.
+    # configuration re-separate and damps internal motion.  The Fermi
+    # (phase-space occupation) constraint stays active during cooling
+    # (report Sec. 4.3 — it is part of every propagation step now).
     cooling_steps = max(1, int(round(250.0 / float(dt))))
     propagate(system, dt=float(dt), n_steps=cooling_steps, sample_every=cooling_steps + 1,
               with_collisions=False, remove_cm_drift=False,
@@ -406,18 +466,26 @@ def impact_parameter_scan(
     decay_seed: int = 25000,
     separation: float | None = None,
     sigma_r: float = 1.1,
-    relax_time: float = 800.0,
-    time_fm_c: float = 1000.0,
+    relax_time: float | None = None,
+    time_fm_c: float = 500.0,
     dt: float = 1.0,
     collision_dt: float = 1.0,
     fragment_method: str = "mst",
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
     edf: SkyrmeEDF | None = None,
     resample_initial_nuclei: bool = False,
     use_grid_edf: bool = True,
     use_hivap: bool = False,
 ) -> CrossSectionScanResult:
-    """Run an impact-parameter scan and accumulate ``dσ/dZ``."""
+    """Run an impact-parameter scan and accumulate ``dσ/dZ``.
+
+    Poisson error estimates are reported alongside the cross sections
+    (δσ ≈ σ/√N_events scaling): per-b ``sigma_by_z_err`` and integrated
+    ``dsigma_dz_err`` / ``total_cross_section_err``.  Note the published
+    imQMD MNT baseline is 100,000+ events per impact parameter (research
+    report Sec. 4.2); with the default small event counts the reported
+    errors are correspondingly large and should be quoted with the results.
+    """
 
     estimated_bmax = estimate_grazing_bmax(projectile_z, projectile_a, target_z, target_a)
     b_max = float(estimated_bmax if b_max is None else b_max)
@@ -472,6 +540,10 @@ def impact_parameter_scan(
     sigma_total_by_a: dict[int, float] = defaultdict(float)
     sigma_total_by_za: dict[tuple, float] = defaultdict(float)
     sigma_light_by_z: dict[int, float] = defaultdict(float)
+    # Poisson variance accumulators: Var = sum_b w_b^2 * count(b), so that
+    # delta_sigma = sqrt(Var) reduces to sigma/sqrt(N) for a single bin.
+    var_total_by_z: dict[int, float] = defaultdict(float)
+    var_reaction = 0.0
     sigma_reaction = 0.0
 
     # d2sigma binning for heavy (MNT) products.  The full angular range is
@@ -486,6 +558,8 @@ def impact_parameter_scan(
         events = sorted(by_b.get(float(b), []), key=lambda item: item.event_index)
         sigma_by_z: dict[int, float] = defaultdict(float)
         light_by_z: dict[int, float] = defaultdict(float)
+        count_by_z: dict[int, int] = defaultdict(int)
+        n_reactive = 0
         if events:
             weight = 2.0 * np.pi * float(b) * float(width) / float(len(events))
             for event in events:
@@ -498,11 +572,14 @@ def impact_parameter_scan(
                     target_a,
                 ):
                     sigma_reaction += weight
+                    n_reactive += 1
                 for fragment in heavy:
                     sigma_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_z[int(fragment.final_Z)] += weight
                     sigma_total_by_a[int(fragment.final_A)] += weight
                     sigma_total_by_za[(int(fragment.final_Z), int(fragment.final_A))] += weight
+                    count_by_z[int(fragment.final_Z)] += 1
+                    var_total_by_z[int(fragment.final_Z)] += weight * weight
                     if fragment.e_lab > 0:
                         it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 89)
                         ie = np.clip(np.digitize(fragment.e_lab, e_grid) - 1, 0, 79)
@@ -513,6 +590,11 @@ def impact_parameter_scan(
                         z = int(fragment.final_Z)
                         light_by_z[z] += weight
                         sigma_light_by_z[z] += weight
+            var_reaction += n_reactive * weight * weight
+        # Poisson errors at this b: delta_sigma = w_b * sqrt(count).
+        w_b = 2.0 * np.pi * float(b) * float(width) / float(len(events)) if events else 0.0
+        sigma_by_z_err = {z: float(w_b * np.sqrt(count_by_z[z])) for z in sigma_by_z}
+        total_sigma_err = float(w_b * np.sqrt(sum(count_by_z.values()))) if events else 0.0
         ordered_results.append(
             ImpactParameterResult(
                 b=float(b),
@@ -522,10 +604,13 @@ def impact_parameter_scan(
                 sigma_by_z=dict(sorted(sigma_by_z.items())),
                 total_sigma=float(sum(sigma_by_z.values())),
                 light_yield_by_z=dict(sorted(light_by_z.items())),
+                sigma_by_z_err=dict(sorted(sigma_by_z_err.items())),
+                total_sigma_err=total_sigma_err,
             )
         )
 
     d2sigma = (tuple(theta_grid.tolist()), tuple(e_grid.tolist()), tuple(d2.ravel().tolist()))
+    dsigma_dz_err = {z: float(np.sqrt(var_total_by_z[z])) for z in sigma_total_by_z}
     return CrossSectionScanResult(
         projectile=(int(projectile_z), int(projectile_a)),
         target=(int(target_z), int(target_a)),
@@ -540,6 +625,8 @@ def impact_parameter_scan(
         dsigma_za={f"{z},{a}": float(s) for (z,a),s in sigma_total_by_za.items()},
         d2sigma=d2sigma,
         dsigma_dz_light=dict(sorted(sigma_light_by_z.items())),
+        dsigma_dz_err=dict(sorted(dsigma_dz_err.items())),
+        total_cross_section_err=float(np.sqrt(var_reaction)),
     )
 
 

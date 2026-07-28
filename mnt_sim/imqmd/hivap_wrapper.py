@@ -3,6 +3,14 @@
 Writes input.dat with (A1=Afrag-1, Z1=Zfrag-1, A2=1, Z2=1) to form
 CN = (Zfrag, Afrag), runs hivap.exe, and parses SIGXPN.DAT for
 evaporation branching ratios.
+
+The research report's reference two-stage scheme is imQMD+GEMINI with
+aden_type=-23, imf_option=2, Z_imf_min=5 and a 500 fm/c switch time.
+GEMINI is not bundled in this repository, so the HIVAP path (also an
+established imQMD coupling, e.g. the N=126 MNT studies) is the completed
+one here; the 500 fm/c switch time is set in reaction.run_imqmd_event.
+If GEMINI becomes available, mirror this module's interface
+(run_*/sample_residue) so reaction.py can select it by name.
 """
 
 from __future__ import annotations
@@ -93,7 +101,10 @@ def run_hivap(
     """Run HIVAP for a single hot fragment.
 
     Returns list of (final_Z, final_A, probability).
-    (-1, -1, prob) represents fission.
+    (-1, -1, prob) represents fission.  Returns an EMPTY list when HIVAP
+    itself failed (binary error, timeout, missing/garbled output) so that
+    callers can fall back to the local evaporation chain; the trivial
+    no-decay cases (E*<=0 or A<=4) return [(z_frag, a_frag, 1.0)].
 
     Parameters
     ----------
@@ -109,6 +120,9 @@ def run_hivap(
     if e_star <= 0 or a_frag <= 4:
         return [(z_frag, a_frag, 1.0)]
 
+    # Round the excitation to the 0.1 MeV written into input.dat so the
+    # lru_cache actually deduplicates calls (floats otherwise never match).
+    e_star = round(float(e_star), 1)
     work_dir = hivap_dir or _HIVAP_DIR
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -133,16 +147,16 @@ def run_hivap(
                 timeout=30,
             )
         except (subprocess.TimeoutExpired, OSError):
-            return [(z_frag, a_frag, 1.0)]
+            return []
 
         # Parse output
         sigxpn_path = os.path.join(tmpdir, "SIGXPN.DAT")
         if not os.path.exists(sigxpn_path):
-            return [(z_frag, a_frag, 1.0)]
+            return []
 
         channels = _parse_sigxpn(sigxpn_path, e_star)
         if not channels:
-            return [(z_frag, a_frag, 1.0)]
+            return []
 
         # Convert (np, nn) to (Z_final, A_final)
         results = []
@@ -163,12 +177,22 @@ def sample_residue(
     e_star: float,
     rng: np.random.Generator | None = None,
 ) -> tuple[int, int]:
-    """Sample one evaporation residue from HIVAP branching ratios."""
+    """Sample one evaporation residue from HIVAP branching ratios.
+
+    Fallback policy: if HIVAP fails to produce branching ratios (binary
+    missing, timeout, unparseable output) the fragment is de-excited with
+    the local Weisskopf evaporation chain instead of being returned hot.
+    A fission outcome (-1, -1) keeps the parent (Z, A) as a placeholder —
+    EventFragmentRecord cannot represent two fission products yet.
+    """
     rng = rng or np.random.default_rng()
-    channels = run_hivap(z_frag, a_frag, e_star)
+    # Round before the call so the lru_cache on run_hivap deduplicates.
+    channels = run_hivap(int(z_frag), int(a_frag), round(float(e_star), 1))
 
     if not channels:
-        return z_frag, a_frag
+        from .decay import evaporate_full
+
+        return evaporate_full(z_frag, a_frag, e_star, rng=rng)
 
     # Use all channels including fission (-1, -1)
     zs = [z for z, a, p in channels]
@@ -176,7 +200,9 @@ def sample_residue(
     ps = [p for z, a, p in channels]
     total_p = sum(ps)
     if total_p <= 0:
-        return z_frag, a_frag
+        from .decay import evaporate_full
+
+        return evaporate_full(z_frag, a_frag, e_star, rng=rng)
     ps = [p / total_p for p in ps]
 
     idx = rng.choice(len(channels), p=ps)

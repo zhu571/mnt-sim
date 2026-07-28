@@ -64,7 +64,13 @@ def _coulomb_exchange_force(nucleus: ImQMDNucleus, positions: np.ndarray) -> np.
 
 
 def _centroid_density_force(nucleus: ImQMDNucleus, positions: np.ndarray) -> np.ndarray:
-    """Analytic force matching the centroid-sampled EDF in ``energy_components``."""
+    """Analytic force matching the centroid-sampled EDF in ``energy_components``.
+
+    DEPRECATED (legacy centroid path): kept for static unit tests only.
+    Production propagation uses the GridEDF path (grid_edf forces), which is
+    the energy/force-self-consistent implementation; do not wire this back
+    into reaction runs.
+    """
 
     p = nucleus.edf.parameters
     sigma2 = nucleus.sigma_r**2
@@ -105,7 +111,11 @@ def _centroid_density_force(nucleus: ImQMDNucleus, positions: np.ndarray) -> np.
 
 
 def _surface_pair_force(nucleus: ImQMDNucleus, positions: np.ndarray) -> np.ndarray:
-    """Force matching ``SkyrmeEDF.surface_pair_energy``."""
+    """Force matching ``SkyrmeEDF.surface_pair_energy``.
+
+    DEPRECATED (legacy centroid path): the g0 surface term lives in GridEDF
+    for production; this compact pair form is only used by static tests.
+    """
 
     if nucleus.A < 2:
         return np.zeros_like(positions, dtype=float)
@@ -117,7 +127,12 @@ def _surface_pair_force(nucleus: ImQMDNucleus, positions: np.ndarray) -> np.ndar
 
 
 def _surface_symmetry_pair_force(nucleus: ImQMDNucleus, positions: np.ndarray) -> np.ndarray:
-    """Force matching ``SkyrmeEDF.surface_symmetry_energy``."""
+    """Force matching ``SkyrmeEDF.surface_symmetry_energy``.
+
+    DEPRECATED (legacy centroid path): the κs surface-symmetry force is now
+    part of GridEDF.forces_analytical (P0 fix); this pair form is only used
+    by static tests.
+    """
 
     if nucleus.A < 2:
         return np.zeros_like(positions, dtype=float)
@@ -165,6 +180,7 @@ def _derivatives(
     drdt = momenta / M_N
     dpdt = _static_reference_force(nucleus, positions) if use_static_stabilizer else np.zeros_like(positions, dtype=float)
     if grid_edf is None:
+        # DEPRECATED legacy centroid path (no GridEDF): static tests only.
         dpdt += _centroid_density_force(nucleus, positions)
         if use_surface_term:
             dpdt += _surface_pair_force(nucleus, positions)
@@ -239,7 +255,7 @@ def _snapshot(nucleus: ImQMDNucleus, time: float, grid_edf: GridEDF | None = Non
     if grid_edf is None:
         grid_edf = GridEDF(
             nucleus.edf.parameters,
-            nucleus.sigma_r,
+            nucleus.packet_sigmas,
             nuclear_scale=float(getattr(nucleus, "grid_nuclear_scale", 1.0)),
         )
     components = grid_edf.total_energy(
@@ -280,10 +296,14 @@ def propagate(
     use_static_stabilizer: bool = False,
     use_grid_edf: bool = False,
     apply_fermi_constraint: bool | None = None,
+    fermi_dt: float | None = None,
 ) -> list[dict[str, float]]:
     """Propagate centroids with fourth-order Runge-Kutta.
 
     Time is in fm/c.  Momenta are MeV/c, so ``dot(r)=p/m`` has units of c.
+
+    ``fermi_dt`` sets the Fermi-constraint interval; ``None`` (default)
+    applies the constraint every step (research report Sec. 4.3).
     """
 
     if sample_every is None:
@@ -297,8 +317,11 @@ def propagate(
         # no longer needed.
         apply_fermi_constraint = True
     fermi_threshold = 1.0  # Wigner occupation threshold (CoMD standard)
-    fermi_time = 20.0 if use_static_stabilizer else 5.0
-    fermi_interval = max(1, int(round(fermi_time / float(dt))))
+    # Research report Sec. 4.3: the phase-space occupation constraint is
+    # applied AT EVERY TIME STEP (the previous every-5-fm/c schedule let
+    # over-occupied states survive between corrections).  fermi_dt can
+    # relax this to a longer interval if ever needed.
+    fermi_interval = 1 if fermi_dt is None else max(1, int(round(float(fermi_dt) / float(dt))))
     if collision_dt is not None:
         collision_interval = max(1, int(round(float(collision_dt) / float(dt))))
     nucleus.use_surface_term = bool(use_surface_term)
@@ -306,7 +329,7 @@ def propagate(
     if use_grid_edf:
         grid_edf = GridEDF(
             nucleus.edf.parameters,
-            nucleus.sigma_r,
+            nucleus.packet_sigmas,
             nuclear_scale=float(getattr(nucleus, "grid_nuclear_scale", 1.0)),
         )
     else:
@@ -323,7 +346,10 @@ def propagate(
         )
         if with_collisions and step % collision_interval == 0:
             attempt_nn_collision(nucleus, dt=float(dt) * collision_interval)
-        if with_collisions and apply_fermi_constraint and step % fermi_interval == 0:
+        # The Fermi constraint is applied every step and no longer gated on
+        # with_collisions: the collisionless cooling stage needs it too
+        # (report Sec. 4.3 — the constraint is part of the propagation).
+        if apply_fermi_constraint and step % fermi_interval == 0:
             group_ids = getattr(nucleus, "reference_group_ids", None)
             fermi_constraint_check(nucleus, threshold=fermi_threshold, group_ids=group_ids)
         if step % sample_every == 0 or step == n_steps:

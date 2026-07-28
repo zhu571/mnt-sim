@@ -43,6 +43,7 @@ from .initializer import (
     grid_energy_diagnostics,
     initialize_and_relax,
     initialize_nucleus,
+    select_candidates,
 )
 from .nucleus import GaussianPacket, ImQMDNucleus
 from .propagator import propagate
@@ -110,6 +111,7 @@ __all__ = [
     "propagate",
     "reaction_fragments",
     "run_imqmd_event",
+    "select_candidates",
     "grid_energy_diagnostics",
     "validate_neutron_separation_energies",
     "weisskopf_evaporation",

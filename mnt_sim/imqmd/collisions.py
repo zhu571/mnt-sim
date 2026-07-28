@@ -7,7 +7,9 @@ import numpy as np
 from .nucleus import ImQMDNucleus
 from .skyrme import HBAR_C, M_N
 
-RHO0 = 0.16
+# Saturation density (fm^-3), unified with the Skyrme parameter sets
+# (IQ1-IQ3 all use rho0 = 0.165, see research report Sec. 4.1).
+RHO0 = 0.165
 MB_TO_FM2 = 0.1
 NEIGHBOR_CELL_SIZE_FM = 5.0
 NEIGHBOR_REBUILD_INTERVAL = 10
@@ -51,17 +53,64 @@ def free_nn_cross_section(E_cm: float, pair_type: str) -> float:
     return float(np.clip(sigma, 1.0, 250.0))
 
 
-def in_medium_factor(rho: float, is_pp_nn_or_np: str = "np", eta: float = 0.2, rho0: float = RHO0) -> float:
-    """Return density reduction factor for the NN cross section."""
+def _sqrt_s_gev(e_cm: float | None) -> float:
+    """Return the NN pair invariant energy sqrt(s) in GeV.
+
+    ``e_cm`` is the relative kinetic energy in the pair CM frame (MeV),
+    e_cm = q^2/M_N with q the CM momentum of each nucleon, so
+    sqrt(s) = 2*sqrt(M_N^2 + q^2) = 2*sqrt(M_N^2 + M_N*e_cm).
+    ``None`` (unknown kinematics) falls back to the threshold value 2*M_N.
+    """
+
+    e_kin = 0.0 if e_cm is None else max(0.0, float(e_cm))
+    return 2.0 * np.sqrt(M_N * M_N + M_N * e_kin) / 1000.0
+
+
+def in_medium_factor(
+    rho: float,
+    is_pp_nn_or_np: str = "np",
+    eta: float = 0.2,
+    rho0: float = RHO0,
+    e_cm: float | None = None,
+) -> float:
+    """Return the in-medium NN cross-section ENHANCEMENT factor.
+
+    sigma_med = (1 + eta*sqrt(s) * rho/rho0) * sigma_free, with sqrt(s) in GeV
+    (research report Sec. 4.4; Chen et al. 2024 Eq. (5) writes the general form
+    (1 + eta(sqrt(s)) * rho/rho0) and finds the extracted in-medium cross
+    section is enhanced ~1.1-2.5x below 150 MeV/u).  The previous code used the
+    reduction form (1 - eta*rho/rho0) with the wrong sign for this
+    parameterization.  eta = 0.2 gives ~1.38x at rho0 at near-barrier energies.
+    The clip only guards against pathological inputs; it is inactive in the
+    physical regime.
+    """
 
     del is_pp_nn_or_np
-    return float(np.clip(1.0 - eta * max(0.0, float(rho)) / rho0, 0.2, 1.0))
+    factor = 1.0 + float(eta) * _sqrt_s_gev(e_cm) * max(0.0, float(rho)) / float(rho0)
+    return float(np.clip(factor, 0.2, 3.0))
 
 
 def in_medium_nn_cross_section(E_cm: float, pair_type: str, rho: float, eta: float = 0.2) -> float:
     """Return ``sigma_NN_med = f_med * sigma_NN_free`` in mb."""
 
-    return in_medium_factor(rho, pair_type, eta=eta) * free_nn_cross_section(E_cm, pair_type)
+    return in_medium_factor(rho, pair_type, eta=eta, e_cm=E_cm) * free_nn_cross_section(E_cm, pair_type)
+
+
+def _pair_effective_widths(
+    sigma_i: float,
+    sigmas: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-neighbour (σ_r², σ_p²) for the Wigner kernel.
+
+    With system-size-dependent widths (Wang 2002 Eq. (18)) two packets may
+    carry different σ_r.  The overlap kernel of two Gaussians uses the
+    mean variance σ_ik² = (σ_i² + σ_k²)/2, with σ_p = ħ/(2σ_r) per pair,
+    reducing exactly to the common-σ kernel when all widths are equal.
+    """
+
+    s2 = 0.5 * (float(sigma_i) ** 2 + np.asarray(sigmas, dtype=float) ** 2)
+    sp2 = HBAR_C**2 / (4.0 * s2)
+    return s2, sp2
 
 
 def _occupation_wigner(
@@ -70,27 +119,34 @@ def _occupation_wigner(
     is_proton_i: bool,
     nucleus: ImQMDNucleus,
     exclude: tuple[int, int],
-    width_scale: float = 1.0,
+    sigma_i: float | None = None,
 ) -> float:
     positions = nucleus.positions
     momenta = nucleus.momenta
+    sigmas_all = nucleus.packet_sigmas
     same_species = nucleus.is_proton == bool(is_proton_i)
     if exclude:
         same_species[list(exclude)] = False
     if not np.any(same_species):
         return 0.0
 
-    sigma_r = nucleus.sigma_r * width_scale
-    sigma_p = HBAR_C / (2.0 * sigma_r)
+    if sigma_i is None:
+        sigma_i = float(sigmas_all[0])
+    s2, sp2 = _pair_effective_widths(sigma_i, sigmas_all[same_species])
     dr2 = np.sum((positions[same_species] - r_i) ** 2, axis=1)
     dp2 = np.sum((momenta[same_species] - p_final) ** 2, axis=1)
-    weights = np.exp(-dr2 / (2.0 * sigma_r**2) - dp2 / (2.0 * sigma_p**2))
+    weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
 
-    # Explicit Wigner normalization: f_i = 1/(pi*hbar)^3 exp(...).
-    # The phase-space volume per spin-degenerate nucleon state is h^3/4,
-    # so the net occupation is 2 * sum(weights), matching the ImQMD spec.
+    # Wigner normalization (Zhang et al. 2020 review, Eq. (63)): the
+    # phase-space cell per same-species state is h^3/2 (spin degeneracy 2),
+    # so occupation = (h^3/2) * [1/(pi*hbar)^3] * sum(weights) = 4 * sum.
+    # The factor 2/(2*pi*hbar)^3 "results from consideration of the spin in
+    # the phase-space cell.  The prefactors combine into a total factor 4."
+    # The same-species sum makes the old 2*sum convention (h^3/4 cell) wrong
+    # by a factor of two; the 4*sum form also replaces the removed 1.35
+    # width-broadening hack.
     wigner_norm = 1.0 / (np.pi * HBAR_C) ** 3
-    phase_space_cell = (2.0 * np.pi * HBAR_C) ** 3 / 4.0
+    phase_space_cell = (2.0 * np.pi * HBAR_C) ** 3 / 2.0
     occupation = phase_space_cell * wigner_norm * np.sum(weights)
     return float(np.clip(occupation, 0.0, 1.0))
 
@@ -117,8 +173,9 @@ def pauli_blocking_probability(
         j = int(np.argmin(np.linalg.norm(momenta - p2, axis=1)))
     positions = nucleus.positions
     species = nucleus.is_proton
-    p_i = _occupation_wigner(positions[i], np.asarray(p3, dtype=float), bool(species[i]), nucleus, (i, j))
-    p_j = _occupation_wigner(positions[j], np.asarray(p4, dtype=float), bool(species[j]), nucleus, (i, j))
+    sigmas = nucleus.packet_sigmas
+    p_i = _occupation_wigner(positions[i], np.asarray(p3, dtype=float), bool(species[i]), nucleus, (i, j), sigmas[i])
+    p_j = _occupation_wigner(positions[j], np.asarray(p4, dtype=float), bool(species[j]), nucleus, (i, j), sigmas[j])
     return float(np.clip(1.0 - (1.0 - p_i) * (1.0 - p_j), 0.0, 1.0))
 
 
@@ -129,19 +186,16 @@ def pauli_blocking_probability_v2(
     p4: np.ndarray,
     nucleus: ImQMDNucleus,
 ) -> float:
-    """Smoother Chen-2024-inspired blocker using a broadened Wigner kernel."""
+    """Alias of ``pauli_blocking_probability`` kept for backward compatibility.
 
-    momenta = nucleus.momenta
-    if hasattr(nucleus, "_active_collision_pair"):
-        i, j = nucleus._active_collision_pair
-    else:
-        i = int(np.argmin(np.linalg.norm(momenta - p1, axis=1)))
-        j = int(np.argmin(np.linalg.norm(momenta - p2, axis=1)))
-    positions = nucleus.positions
-    species = nucleus.is_proton
-    p_i = _occupation_wigner(positions[i], np.asarray(p3, dtype=float), bool(species[i]), nucleus, (i, j), 1.35)
-    p_j = _occupation_wigner(positions[j], np.asarray(p4, dtype=float), bool(species[j]), nucleus, (i, j), 1.35)
-    return float(np.clip(1.0 - (1.0 - p_i) * (1.0 - p_j), 0.0, 1.0))
+    The 1.35 Wigner-kernel broadening that used to distinguish this variant
+    was a compensating hack for the factor-of-two normalization error in the
+    occupation (2*sum instead of the correct 4*sum, see _occupation_wigner).
+    With the normalization fixed, the hack is removed and both entry points
+    share the same standard blocking (Zhang 2020 review Eq. (63)).
+    """
+
+    return pauli_blocking_probability(p1, p2, p3, p4, nucleus)
 
 
 def _occupation_wigner_fast(
@@ -151,23 +205,24 @@ def _occupation_wigner_fast(
     positions: np.ndarray,
     momenta: np.ndarray,
     is_proton: np.ndarray,
-    sigma_r: float,
+    sigmas: np.ndarray,
+    sigma_i: float,
     exclude: tuple[int, int],
-    width_scale: float = 1.0,
 ) -> float:
     same_species = is_proton == bool(is_proton_i)
     same_species[list(exclude)] = False
     if not np.any(same_species):
         return 0.0
 
-    sigma_r = sigma_r * width_scale
-    sigma_p = HBAR_C / (2.0 * sigma_r)
+    s2, sp2 = _pair_effective_widths(sigma_i, np.asarray(sigmas)[same_species])
     dr2 = np.sum((positions[same_species] - r_i) ** 2, axis=1)
     dp2 = np.sum((momenta[same_species] - p_final) ** 2, axis=1)
-    weights = np.exp(-dr2 / (2.0 * sigma_r**2) - dp2 / (2.0 * sigma_p**2))
+    weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
 
+    # h^3/2 phase-space cell (spin degeneracy 2, same-species sum):
+    # occupation = 4 * sum(weights) — Zhang 2020 review Eq. (63).
     wigner_norm = 1.0 / (np.pi * HBAR_C) ** 3
-    phase_space_cell = (2.0 * np.pi * HBAR_C) ** 3 / 4.0
+    phase_space_cell = (2.0 * np.pi * HBAR_C) ** 3 / 2.0
     occupation = phase_space_cell * wigner_norm * np.sum(weights)
     return float(np.clip(occupation, 0.0, 1.0))
 
@@ -182,17 +237,12 @@ def _pauli_blocking_probability_fast(
     is_proton: np.ndarray,
     rho_n: np.ndarray,
     rho_p: np.ndarray,
-    sigma_r: float,
-    width_scale: float = 1.35,
+    sigmas: np.ndarray,
 ) -> float:
-    # Broadened Wigner kernel (same 1.35 factor as pauli_blocking_probability_v2,
-    # "Chen-2024-inspired").  The fixed packet width sigma_r≈1.06 fm is much
-    # narrower than the interparticle spacing at rho0, so the unbroadened
-    # kernel systematically underestimates the occupation of Fermi-sea final
-    # states.  That leaked ~6% of attempted NN scatterings at near-barrier
-    # energies (1.0e4 accepted in one U+U event), thermalizing the system
-    # into multifragmentation.  The broadened kernel restores blocking for
-    # in-sea final states while leaving genuinely empty states open.
+    # Standard 4*sum blocking (Zhang 2020 review Eq. (63)).  The previous
+    # 1.35 kernel broadening was a compensating hack for the factor-of-two
+    # normalization error (2*sum); with the correct normalization the
+    # unbroadened kernel gives the proper blocking of Fermi-sea final states.
     p_i = _occupation_wigner_fast(
         positions[i],
         np.asarray(p3, dtype=float),
@@ -200,9 +250,9 @@ def _pauli_blocking_probability_fast(
         positions,
         momenta,
         is_proton,
-        sigma_r,
+        sigmas,
+        sigmas[i],
         (i, j),
-        width_scale,
     )
     p_j = _occupation_wigner_fast(
         positions[j],
@@ -211,9 +261,9 @@ def _pauli_blocking_probability_fast(
         positions,
         momenta,
         is_proton,
-        sigma_r,
+        sigmas,
+        sigmas[j],
         (i, j),
-        width_scale,
     )
     return float(np.clip(1.0 - (1.0 - p_i) * (1.0 - p_j), 0.0, 1.0))
 
@@ -361,7 +411,7 @@ def attempt_nn_collision(nucleus: ImQMDNucleus, dt: float) -> dict[str, int]:
             is_proton,
             rho_n,
             rho_p,
-            nucleus.sigma_r,
+            nucleus.packet_sigmas,
         )
         if rng.random() < p_block:
             stats["blocked"] += 1
@@ -389,14 +439,14 @@ def _compute_occupation_field(
     positions = nucleus.positions
     momenta = nucleus.momenta
     is_proton = nucleus.is_proton
-    sigma_r = nucleus.sigma_r
-    sigma_p = HBAR_C / (2.0 * sigma_r)
+    sigmas = nucleus.packet_sigmas
     n = nucleus.A
 
-    # Cache per-nucleon Wigner density kernel
-    wigner_norm = 1.0 / (np.pi * HBAR_C) ** 3
-    ps_cell = (2.0 * np.pi * HBAR_C) ** 3 / 4.0
-    scale = ps_cell * wigner_norm  # = 2.0
+    # h^3/2 phase-space cell (spin degeneracy 2, same-species sum):
+    # occupation = 4 * sum(weights), same convention as the Pauli blocking
+    # (Zhang 2020 review Eq. (63)); the CoMD threshold f_bar <= 1 refers to
+    # this same per-state occupation.
+    scale = 4.0
 
     occupations = np.zeros(n, dtype=float)
     for i in range(n):
@@ -407,9 +457,10 @@ def _compute_occupation_field(
         mask[i] = False
         if not np.any(mask):
             continue
+        s2, sp2 = _pair_effective_widths(sigmas[i], sigmas[mask])
         dr2 = np.sum((positions[mask] - positions[i]) ** 2, axis=1)
         dp2 = np.sum((momenta[mask] - momenta[i]) ** 2, axis=1)
-        weights = np.exp(-dr2 / (2.0 * sigma_r**2) - dp2 / (2.0 * sigma_p**2))
+        weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
         occupations[i] = scale * np.sum(weights)
     return occupations
 
@@ -423,9 +474,11 @@ def fermi_constraint_check(
 
     Computes the Wigner occupation f_i for each nucleon from same-species
     neighbours.  For every nucleon with f_i > ``threshold`` (default 1.0,
-    one spin-degenerate state per phase-space cell h³/4) the routine searches
-    nearby same-species (same-group) partners and performs the momentum swap
-    p_i ↔ p_j that gives the largest decrease of f_i + f_j.
+    one state per phase-space cell h³/2 — spin degeneracy 2 within one
+    isospin species, the Zhang 2020 review Eq. (63) convention shared with
+    the Pauli blocking) the routine searches nearby same-species
+    (same-group) partners and performs the momentum swap p_i ↔ p_j that
+    gives the largest decrease of f_i + f_j.
 
     A momentum swap only relabels momenta inside the same-species set, so
     total momentum and total kinetic energy are conserved exactly.  This is
@@ -455,19 +508,20 @@ def fermi_constraint_check(
     positions = nucleus.positions
     momenta = nucleus.momenta.copy()
     is_proton = nucleus.is_proton
-    sigma_r = nucleus.sigma_r
-    sigma_p = HBAR_C / (2.0 * sigma_r)
+    sigmas = nucleus.packet_sigmas
 
-    def _occupation_at(r: np.ndarray, p: np.ndarray, mask: np.ndarray, skip: tuple[int, ...]) -> float:
+    def _occupation_at(r: np.ndarray, p: np.ndarray, mask: np.ndarray, skip: tuple[int, ...], sigma_ref: float) -> float:
         m = mask.copy()
         m[list(skip)] = False
         if not np.any(m):
             return 0.0
+        s2, sp2 = _pair_effective_widths(sigma_ref, sigmas[m])
         dr2 = np.sum((positions[m] - r) ** 2, axis=1)
         dp2 = np.sum((momenta[m] - p) ** 2, axis=1)
-        weights = np.exp(-dr2 / (2.0 * sigma_r**2) - dp2 / (2.0 * sigma_p**2))
-        # ps_cell * wigner_norm = (2πħ)³/4 · 1/(πħ)³ = 2 (see _compute_occupation_field)
-        return float(2.0 * np.sum(weights))
+        weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
+        # h^3/2 phase-space cell, same-species sum: occupation = 4*sum
+        # (Zhang 2020 review Eq. (63), same convention as Pauli blocking).
+        return float(4.0 * np.sum(weights))
 
     occupations = _compute_occupation_field(nucleus, group_ids)
     # Most-occupied first so the worst violations are resolved before the
@@ -478,7 +532,8 @@ def fermi_constraint_check(
         return 0
 
     corrections = 0
-    spatial_cut2 = (4.0 * sigma_r) ** 2  # Wigner spatial kernel is dead beyond 4σ
+    max_sigma = float(np.max(sigmas))
+    spatial_cut2 = (4.0 * max_sigma) ** 2  # Wigner spatial kernel is dead beyond 4σ
     max_candidates = 8
     for i in violating:
         i = int(i)
@@ -502,14 +557,14 @@ def fermi_constraint_check(
         if len(candidates) > max_candidates:
             candidates = candidates[np.argsort(dp_mag)[::-1][:max_candidates]]
 
-        f_i_old = _occupation_at(positions[i], momenta[i], mask, (i,))
+        f_i_old = _occupation_at(positions[i], momenta[i], mask, (i,), sigmas[i])
         best_j = -1
         best_delta = 1.0e-6  # require a strict decrease of f_i + f_j
         for j in candidates:
             j = int(j)
-            f_j_old = _occupation_at(positions[j], momenta[j], mask, (j,))
-            f_i_new = _occupation_at(positions[i], momenta[j], mask, (i, j))
-            f_j_new = _occupation_at(positions[j], momenta[i], mask, (i, j))
+            f_j_old = _occupation_at(positions[j], momenta[j], mask, (j,), sigmas[j])
+            f_i_new = _occupation_at(positions[i], momenta[j], mask, (i, j), sigmas[i])
+            f_j_new = _occupation_at(positions[j], momenta[i], mask, (i, j), sigmas[j])
             delta = (f_i_old + f_j_old) - (f_i_new + f_j_new)
             if delta > best_delta:
                 best_delta = delta

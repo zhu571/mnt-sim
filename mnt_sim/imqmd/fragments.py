@@ -85,12 +85,14 @@ def _pair_distances(values: np.ndarray) -> np.ndarray:
 def minimum_spanning_tree(
     nucleus: ImQMDNucleus,
     r_cut: float = 3.5,
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
 ) -> list[Fragment]:
     """Recognize fragments with the QMD minimum-spanning-tree rule.
 
     Despite the historical name, the algorithm returns connected components of
-    the phase-space proximity graph.
+    the phase-space proximity graph.  p_cut default 300 MeV/c follows the
+    imQMD MNT criterion (research report Sec. 4.5); the classic QMD value is
+    250 MeV/c (Aichelin 1991, Zhang 2020 review).
     """
 
     n = nucleus.A
@@ -110,9 +112,12 @@ def isospin_mst(
     r_cut_pp: float = 3.0,
     r_cut_nn: float = 6.0,
     r_cut_np: float = 6.0,
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
 ) -> list[Fragment]:
-    """Recognize fragments with isospin-dependent coordinate cutoffs."""
+    """Recognize fragments with isospin-dependent coordinate cutoffs.
+
+    p_cut default 300 MeV/c (research report Sec. 4.5 MNT criterion).
+    """
 
     n = nucleus.A
     if n == 0:
@@ -266,7 +271,12 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
     from .grid_edf import GridEDF
 
     fragment_scale = fragment_ground_state_scale(fragment.Z, fragment.A, nucleus)
-    grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0, nuclear_scale=fragment_scale)
+    grid = GridEDF(
+        nucleus.edf.parameters,
+        nucleus.packet_sigmas[idx],
+        grid_spacing=1.0,
+        nuclear_scale=fragment_scale,
+    )
     internal_energy = grid.total_energy(
         internal_positions,
         internal_momenta,

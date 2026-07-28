@@ -28,8 +28,16 @@ def test_free_cross_sections():
 
 
 def test_in_medium_scaling():
-    assert in_medium_factor(0.16, "np") < 1.0
-    assert np.isclose(in_medium_factor(0.16, "np"), 0.8)
+    # Enhancement form sigma_med = (1 + eta*sqrt(s)*rho/rho0)*sigma_free
+    # (research report Sec. 4.4 / Chen 2024 Eq. (5)): factor > 1 at rho0 and
+    # growing with sqrt(s).  At threshold sqrt(s) = 2*M_N ~ 1.878 GeV.
+    f_thr = in_medium_factor(0.165, "np")
+    assert f_thr > 1.0
+    assert np.isclose(f_thr, 1.0 + 0.2 * (2.0 * 938.9 / 1000.0), rtol=1e-3)
+    # sqrt(s) dependence: higher CM energy -> larger enhancement
+    assert in_medium_factor(0.165, "np", e_cm=100.0) > f_thr
+    # density dependence: vacuum limit is the free cross section
+    assert np.isclose(in_medium_factor(0.0, "np"), 1.0)
 
 
 def test_pauli_blocking_in_nucleus():
