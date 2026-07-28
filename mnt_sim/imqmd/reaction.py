@@ -512,7 +512,7 @@ def impact_parameter_scan(
                     "decay_seed": int(decay_seed),
                     "separation": separation,
                     "sigma_r": float(sigma_r),
-                    "relax_time": float(relax_time),
+                    "relax_time": relax_time,
                     "time_fm_c": float(time_fm_c),
                     "dt": float(dt),
                     "collision_dt": float(collision_dt),
