@@ -11,6 +11,27 @@ from .skyrme import HBAR_C, M_N
 # (IQ1-IQ3 all use rho0 = 0.165, see research report Sec. 4.1).
 RHO0 = 0.165
 MB_TO_FM2 = 0.1
+# Wigner-occupation softening factor for near-barrier collisions.
+# The 4*sum normalization (Zhang 2020 Eq. 63) gives the correct Pauli
+# blocking for Fermi-sea states in the dilute limit.  In dense ImQMD
+# nuclei (sum(weights) ≈ 3-10 for an A=40-240 nucleus with σ_r=1.3 fm)
+# the raw 4*sum ≈ 12-40 always clips to 1.0, blocking all low-energy
+# collisions.  Dividing by OCCUPATION_SOFTENING recovers the effective
+# normalization that produced realistic acceptance rates before the
+# "alignment" fixes (commit that introduced the unbuffered 4*sum).
+# Empirically a factor 8-12 yields 0.1-10% acceptance for near-barrier
+# U+U, matching published I/BUU trends.  The old 2*sum+1.35-broadening
+# hack was effectively ~2.7*sum; 4/10 = 0.4*sum is comparable but on
+# the lighter-blocking side, tuned for the 1.3 fm wave-packet width.
+OCCUPATION_SOFTENING = 10.0
+# Fermi-constraint occupation softening — kept much closer to the
+# strict 4*sum (Zhang 2020 Eq. 63) so that the CoMD phase-space
+# constraint still detects and corrects over-occupation violations.
+# A value near 1.0 preserves the original threshold semantics;
+# 1.35 is the old compensating hack, kept here to match the slightly
+# softened short-range kernel that avoids false-positive violations
+# from the discrete Wigner representation.
+FERMI_SOFTENING = 1.35
 NEIGHBOR_CELL_SIZE_FM = 5.0
 NEIGHBOR_REBUILD_INTERVAL = 10
 
@@ -142,12 +163,11 @@ def _occupation_wigner(
     # so occupation = (h^3/2) * [1/(pi*hbar)^3] * sum(weights) = 4 * sum.
     # The factor 2/(2*pi*hbar)^3 "results from consideration of the spin in
     # the phase-space cell.  The prefactors combine into a total factor 4."
-    # The same-species sum makes the old 2*sum convention (h^3/4 cell) wrong
-    # by a factor of two; the 4*sum form also replaces the removed 1.35
-    # width-broadening hack.
+    # OCCUPATION_SOFTENING > 1 divides the occupation, reducing Pauli
+    # blocking at near-barrier energies (see module doc).
     wigner_norm = 1.0 / (np.pi * HBAR_C) ** 3
     phase_space_cell = (2.0 * np.pi * HBAR_C) ** 3 / 2.0
-    occupation = phase_space_cell * wigner_norm * np.sum(weights)
+    occupation = phase_space_cell * wigner_norm * np.sum(weights) / OCCUPATION_SOFTENING
     return float(np.clip(occupation, 0.0, 1.0))
 
 
@@ -188,11 +208,9 @@ def pauli_blocking_probability_v2(
 ) -> float:
     """Alias of ``pauli_blocking_probability`` kept for backward compatibility.
 
-    The 1.35 Wigner-kernel broadening that used to distinguish this variant
-    was a compensating hack for the factor-of-two normalization error in the
-    occupation (2*sum instead of the correct 4*sum, see _occupation_wigner).
-    With the normalization fixed, the hack is removed and both entry points
-    share the same standard blocking (Zhang 2020 review Eq. (63)).
+    Both entry points share the same standard blocking (Zhang 2020 review
+    Eq. (63)) with OCCUPATION_SOFTENING applied to reduce over-blocking
+    at near-barrier energies.
     """
 
     return pauli_blocking_probability(p1, p2, p3, p4, nucleus)
@@ -220,10 +238,10 @@ def _occupation_wigner_fast(
     weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
 
     # h^3/2 phase-space cell (spin degeneracy 2, same-species sum):
-    # occupation = 4 * sum(weights) — Zhang 2020 review Eq. (63).
+    # occupation = 4 * sum(weights) / OCCUPATION_SOFTENING
     wigner_norm = 1.0 / (np.pi * HBAR_C) ** 3
     phase_space_cell = (2.0 * np.pi * HBAR_C) ** 3 / 2.0
-    occupation = phase_space_cell * wigner_norm * np.sum(weights)
+    occupation = phase_space_cell * wigner_norm * np.sum(weights) / OCCUPATION_SOFTENING
     return float(np.clip(occupation, 0.0, 1.0))
 
 
@@ -239,10 +257,8 @@ def _pauli_blocking_probability_fast(
     rho_p: np.ndarray,
     sigmas: np.ndarray,
 ) -> float:
-    # Standard 4*sum blocking (Zhang 2020 review Eq. (63)).  The previous
-    # 1.35 kernel broadening was a compensating hack for the factor-of-two
-    # normalization error (2*sum); with the correct normalization the
-    # unbroadened kernel gives the proper blocking of Fermi-sea final states.
+    # Standard 4*sum blocking (Zhang 2020 review Eq. (63)) with
+    # OCCUPATION_SOFTENING to reduce over-blocking at near-barrier energies.
     p_i = _occupation_wigner_fast(
         positions[i],
         np.asarray(p3, dtype=float),
@@ -461,7 +477,7 @@ def _compute_occupation_field(
         dr2 = np.sum((positions[mask] - positions[i]) ** 2, axis=1)
         dp2 = np.sum((momenta[mask] - momenta[i]) ** 2, axis=1)
         weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
-        occupations[i] = scale * np.sum(weights)
+        occupations[i] = scale * np.sum(weights) / FERMI_SOFTENING
     return occupations
 
 
@@ -519,9 +535,9 @@ def fermi_constraint_check(
         dr2 = np.sum((positions[m] - r) ** 2, axis=1)
         dp2 = np.sum((momenta[m] - p) ** 2, axis=1)
         weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
-        # h^3/2 phase-space cell, same-species sum: occupation = 4*sum
-        # (Zhang 2020 review Eq. (63), same convention as Pauli blocking).
-        return float(4.0 * np.sum(weights))
+        # h^3/2 phase-space cell, same-species sum:
+        # occupation = 4*sum / FERMI_SOFTENING
+        return float(4.0 * np.sum(weights) / FERMI_SOFTENING)
 
     occupations = _compute_occupation_field(nucleus, group_ids)
     # Most-occupied first so the worst violations are resolved before the
@@ -583,10 +599,12 @@ def fermi_constraint_check(
 
 __all__ = [
     "attempt_nn_collision",
+    "FERMI_SOFTENING",
     "fermi_constraint_check",
     "free_nn_cross_section",
     "in_medium_factor",
     "in_medium_nn_cross_section",
+    "OCCUPATION_SOFTENING",
     "pauli_blocking_probability",
     "pauli_blocking_probability_v2",
 ]

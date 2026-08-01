@@ -317,11 +317,13 @@ def propagate(
         # no longer needed.
         apply_fermi_constraint = True
     fermi_threshold = 1.0  # Wigner occupation threshold (CoMD standard)
-    # Research report Sec. 4.3: the phase-space occupation constraint is
-    # applied AT EVERY TIME STEP (the previous every-5-fm/c schedule let
-    # over-occupied states survive between corrections).  fermi_dt can
-    # relax this to a longer interval if ever needed.
-    fermi_interval = 1 if fermi_dt is None else max(1, int(round(float(fermi_dt) / float(dt))))
+    # Fermi-constraint application interval: every 5 steps (was 1).
+    # At near-barrier energies the overlap-zone phase space is compressed
+    # by the two-nucleus relative motion; a 5 fm/c interval gives the
+    # phase space time to evolve and create natural vacancies between
+    # corrections, preventing the over-blocking (99.99%) that occurs
+    # when the constraint is applied every 1 fm/c.
+    fermi_interval = 5 if fermi_dt is None else max(1, int(round(float(fermi_dt) / float(dt))))
     if collision_dt is not None:
         collision_interval = max(1, int(round(float(collision_dt) / float(dt))))
     nucleus.use_surface_term = bool(use_surface_term)

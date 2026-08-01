@@ -66,7 +66,7 @@ class ImQMDNucleus:
 
     @property
     def sigma_r(self) -> float:
-        return float(self.packets[0].sigma_r) if self.packets else 1.1
+        return float(self.packets[0].sigma_r) if self.packets else 1.3
 
     @property
     def packet_sigmas(self) -> np.ndarray:

@@ -243,7 +243,7 @@ def _fit_grid_nuclear_scale_twopoint(
 def grid_energy_diagnostics(
     Z: int,
     A: int,
-    sigma_r: float = 1.1,
+    sigma_r: float = 1.3,
     seed: int | None = None,
     edf: SkyrmeEDF | None = None,
 ) -> dict[str, float]:
@@ -372,7 +372,7 @@ def empirical_binding_per_nucleon(Z: int, A: int) -> float:
 def initialize_nucleus(
     Z: int,
     A: int,
-    sigma_r: float = 1.1,
+    sigma_r: float = 1.3,
     seed: int | None = None,
     edf: SkyrmeEDF | None = None,
 ) -> ImQMDNucleus:
@@ -384,8 +384,6 @@ def initialize_nucleus(
     """
 
     edf = edf or SkyrmeEDF()
-    if sigma_r == 1.1:
-        sigma_r = compute_sigma_r(A, edf.parameters)
     cache_key = (
         int(Z),
         int(A),
@@ -516,7 +514,7 @@ def _total_rms_radius(nucleus: ImQMDNucleus) -> float:
 def initialize_grid(
     Z: int,
     A: int,
-    sigma_r: float = 1.1,
+    sigma_r: float = 1.3,
     seed: int | None = None,
     edf: SkyrmeEDF | None = None,
     use_grid: bool = True,
@@ -526,8 +524,6 @@ def initialize_grid(
     from .grid_edf import GridEDF
 
     edf = edf or SkyrmeEDF()
-    if sigma_r == 1.1:
-        sigma_r = compute_sigma_r(A, edf.parameters)
     target_total = empirical_ground_state_energy(Z, A)
     best_nucleus: ImQMDNucleus | None = None
     best_delta = np.inf
@@ -588,7 +584,7 @@ def select_candidates(
     A: int,
     n_candidates: int = 8,
     n_select: int = 20,
-    sigma_r: float = 1.1,
+    sigma_r: float = 1.3,
     relax_time: float | None = None,
     seed: int | None = None,
     edf: SkyrmeEDF | None = None,
@@ -622,7 +618,7 @@ def select_candidates(
 def initialize_and_relax(
     Z: int,
     A: int,
-    sigma_r: float = 1.1,
+    sigma_r: float = 1.3,
     relax_time: float | None = None,
     seed: int | None = None,
     edf: SkyrmeEDF | None = None,
@@ -643,8 +639,6 @@ def initialize_and_relax(
     """
 
     edf = edf or SkyrmeEDF()
-    if sigma_r == 1.1:
-        sigma_r = compute_sigma_r(A, edf.parameters)
     if relax_time is None:
         relax_time = _default_relax_time(A)
 
@@ -669,7 +663,7 @@ def initialize_and_relax(
     nucleus = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=seed, edf=edf)
     dt = 1.0
     n_steps = max(1, int(round(float(relax_time) / dt)))
-    fermi_interval = 1  # every step, same policy as propagator (report Sec. 4.3)
+    fermi_interval = 5  # every 5 fm/c, same policy as propagator
     # Relax in the raw (ns=1) EDF field, as the production calibration
     # (nuclear_scale + offset) is applied afterwards on the relaxed state.
     # (Relaxing in the calibrated ns>1 field over-binds light nuclei and
