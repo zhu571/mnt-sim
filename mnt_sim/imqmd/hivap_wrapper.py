@@ -33,6 +33,89 @@ _REQUIRED_FILES = [
     "shell.dat",
 ]
 
+# AME mass excess (MeV) of the proton, used to turn the mass-excess table
+# into binding-energy differences (S_p = B(Z,A) - B(Z-1,A-1)).
+_PROTON_MASS_EXCESS = 7.289
+
+# Myers-Swiatecki (1967) liquid-drop parameters, mirroring msben.f so the
+# fallback S_p matches HIVAP's own Q-value bookkeeping when the daughter
+# nuclide is missing from the experimental mass table.
+_MS_A1 = 15.4941
+_MS_A2 = 17.9439
+_MS_A3 = 0.7053
+_MS_CAY1 = 1.15303
+_MS_CAY2 = 200.0
+_MS_CAY3 = 11.0
+_MS_GAMMA = 1.7826
+_MS_MN = 8.07144
+_MS_MP = 7.28899
+
+
+@lru_cache(maxsize=4)
+def _mass_excess_table(hivap_dir: str) -> dict[tuple[int, int], float]:
+    """Load the experimental mass excess table {(A, Z): MeV} from Mexcess95.dat.
+
+    Column 4 of Mexcess95.dat is the Audi-Wapstra mass excess in MeV
+    (e.g. U-238 -> 47.304); column 3 is a smooth-model value and is not
+    used here.
+    """
+    table: dict[tuple[int, int], float] = {}
+    path = os.path.join(hivap_dir, "Mexcess95.dat")
+    if not os.path.exists(path):
+        return table
+    with open(path) as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            try:
+                a = int(parts[0])
+                z = int(parts[1])
+                me = float(parts[3])
+            except ValueError:
+                continue
+            table[(a, z)] = me
+    return table
+
+
+def _ld_mass_excess(z: int, a: int) -> float:
+    """Myers-Swiatecki (1967) liquid-drop mass excess, matching MSBEN/SMASS."""
+    zz = float(z)
+    un = float(a - z)
+    aa = float(a)
+    a3rt = aa ** (1.0 / 3.0)
+    a2rt = a3rt * a3rt
+    sym = ((un - zz) / aa) ** 2
+    acor = 1.0 - _MS_GAMMA * sym
+    return (
+        _MS_MN * un
+        + _MS_MP * zz
+        - _MS_A1 * acor * aa
+        + _MS_A2 * acor * a2rt
+        + _MS_A3 * zz * zz / a3rt
+        - _MS_CAY1 * zz * zz / aa
+        - _MS_CAY2 * a2rt * np.exp(-_MS_CAY3 * sym)
+    )
+
+
+def separation_energy(z: int, a: int, hivap_dir: str | None = None) -> float | None:
+    """Proton separation energy S_p(Z,A) = B(Z,A) - B(Z-1,A-1) in MeV.
+
+    Uses the experimental mass excesses from Mexcess95.dat (the same
+    Audi-Wapstra data HIVAP reads for its fusion Q-value), with a
+    Myers-Swiatecki liquid-drop fallback for nuclei absent from the table.
+    Returns None when the fragment is not a bound nucleus (Z < 1).
+    """
+    z, a = int(z), int(a)
+    if z < 1 or a < 1 or a < z:
+        return None
+    table = _mass_excess_table(hivap_dir or _HIVAP_DIR)
+    parent = table.get((a, z))
+    daughter = table.get((a - 1, z - 1))
+    if parent is not None and daughter is not None:
+        return daughter + _PROTON_MASS_EXCESS - parent
+    return _ld_mass_excess(z - 1, a - 1) + _PROTON_MASS_EXCESS - _ld_mass_excess(z, a)
+
 
 def _prepare_workspace(temp_dir: str) -> None:
     """Symlink or copy required data files into a temp workspace."""
@@ -48,9 +131,13 @@ def _prepare_workspace(temp_dir: str) -> None:
         shutil.copy2(_HIVAP_EXE, dst_exe)
 
 
-def _parse_sigxpn(path: str, e_star: float) -> list[tuple[int, int, float]]:
-    """Parse SIGXPN.DAT and return [(final_Z, final_A, probability), ...]."""
-    target_ecm = round(float(e_star), 4)
+def _parse_sigxpn(path: str, target_ecm: float) -> list[tuple[int, int, float]]:
+    """Parse SIGXPN.DAT and return [(final_Z, final_A, probability), ...].
+
+    ``target_ecm`` is the Ecm value written into input.dat; SIGXPN.DAT
+    repeats this column verbatim, so only rows matching it are kept.
+    """
+    target_ecm = round(float(target_ecm), 4)
     channels: dict[tuple[int, int], float] = {}
     total_er = 0.0
     total_fiss = 0.0
@@ -104,7 +191,8 @@ def run_hivap(
     (-1, -1, prob) represents fission.  Returns an EMPTY list when HIVAP
     itself failed (binary error, timeout, missing/garbled output) so that
     callers can fall back to the local evaporation chain; the trivial
-    no-decay cases (E*<=0 or A<=4) return [(z_frag, a_frag, 1.0)].
+    no-decay cases (E*<=0, A<=4, or E* below the proton separation energy
+    S_p) return [(z_frag, a_frag, 1.0)].
 
     Parameters
     ----------
@@ -123,6 +211,20 @@ def run_hivap(
     # Round the excitation to the 0.1 MeV written into input.dat so the
     # lru_cache actually deduplicates calls (floats otherwise never match).
     e_star = round(float(e_star), 1)
+
+    # HIVAP treats the input "Ecm" as the compound-nucleus excitation
+    # energy: EXCIT = Ecm + Q, and the dummy-target trick
+    # (Z-1,A-1) + p -> (Z,A) has Q = S_p(Z,A) (the proton separation
+    # energy of the compound nucleus).  Without correction the fragment is
+    # de-excited at E* + S_p ~ 6-8 MeV too high, over-predicting fission
+    # (audit: U-238 E*=50 -> fiss 87.7%; with S_p subtracted E*_eff~42-44
+    # -> ~77%).  Subtract S_p so the written Ecm reproduces the intended
+    # fragment excitation.  Below the threshold the fragment cannot decay.
+    sp = separation_energy(z_frag, a_frag)
+    if sp is None or e_star - sp <= 0:
+        return [(z_frag, a_frag, 1.0)]
+    ecm = round(e_star - sp, 1)
+
     work_dir = hivap_dir or _HIVAP_DIR
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -134,7 +236,7 @@ def run_hivap(
         input_path = os.path.join(tmpdir, "input.dat")
         with open(input_path, "w") as f:
             f.write(f"{a1} {z1} 1 1\n")
-            f.write(f"{e_star:.1f}\n")
+            f.write(f"{ecm:.1f}\n")
             f.write("0\n")
 
         # Run HIVAP
@@ -149,12 +251,13 @@ def run_hivap(
         except (subprocess.TimeoutExpired, OSError):
             return []
 
-        # Parse output
+        # Parse output.  The SIGXPN.DAT Ecm column echoes the value written
+        # into input.dat, so the parse must use the corrected ecm, not e_star.
         sigxpn_path = os.path.join(tmpdir, "SIGXPN.DAT")
         if not os.path.exists(sigxpn_path):
             return []
 
-        channels = _parse_sigxpn(sigxpn_path, e_star)
+        channels = _parse_sigxpn(sigxpn_path, ecm)
         if not channels:
             return []
 
@@ -176,14 +279,18 @@ def sample_residue(
     a_frag: int,
     e_star: float,
     rng: np.random.Generator | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int] | None:
     """Sample one evaporation residue from HIVAP branching ratios.
+
+    Returns (final_Z, final_A) of the surviving residue, or None when the
+    fragment fissioned: a fission event produces two fission products, not
+    an evaporation residue, and EventFragmentRecord cannot represent two
+    fragments.  Callers (``_record_fragment``) skip None so fissioned
+    fragments do not pollute dsigma/dZ with the un-decayed parent nucleus.
 
     Fallback policy: if HIVAP fails to produce branching ratios (binary
     missing, timeout, unparseable output) the fragment is de-excited with
     the local Weisskopf evaporation chain instead of being returned hot.
-    A fission outcome (-1, -1) keeps the parent (Z, A) as a placeholder —
-    EventFragmentRecord cannot represent two fission products yet.
     """
     rng = rng or np.random.default_rng()
     # Round before the call so the lru_cache on run_hivap deduplicates.
@@ -207,9 +314,9 @@ def sample_residue(
 
     idx = rng.choice(len(channels), p=ps)
     zf, af = zs[idx], a_s[idx]
-    if zf == -1:  # fission
-        return z_frag, a_frag  # keep original fragment as placeholder
+    if zf == -1:  # fission: no evaporation residue, signal with None
+        return None
     return zf, af
 
 
-__all__ = ["run_hivap", "sample_residue"]
+__all__ = ["run_hivap", "sample_residue", "separation_energy"]

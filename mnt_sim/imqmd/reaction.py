@@ -277,13 +277,19 @@ def _record_fragment(
     fragment: Fragment,
     rng: np.random.Generator,
     use_hivap: bool = False,
-) -> EventFragmentRecord:
+) -> EventFragmentRecord | None:
     if use_hivap:
         from .hivap_wrapper import sample_residue
 
-        final_Z, final_A = sample_residue(
+        residue = sample_residue(
             fragment.Z, fragment.A, fragment.excitation_energy, rng=rng
         )
+        if residue is None:
+            # The fragment fissioned: HIVAP has no evaporation residue for
+            # it (sigma_er = 0 channel).  Skip it rather than recording the
+            # un-decayed parent, which would pollute dsigma/dZ.
+            return None
+        final_Z, final_A = residue
     else:
         final_Z, final_A = evaporate_full(
             fragment.Z, fragment.A, fragment.excitation_energy, rng=rng
@@ -391,6 +397,10 @@ def run_imqmd_event(
     raw_records = []
     for fragment in fragments:
         rec = _record_fragment(fragment, decay_rng, use_hivap=use_hivap)
+        if rec is None:
+            # Fragment fissioned and produced no evaporation residue; it
+            # contributes neither to fragment sigma nor to the light yield.
+            continue
         v_f_cm = fragment.momentum / (fragment.A * M_N)
         v_lab = v_cm + v_f_cm
         e_lab = 0.5 * fragment.A * M_N * np.dot(v_lab, v_lab)
