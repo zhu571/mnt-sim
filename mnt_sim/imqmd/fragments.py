@@ -116,6 +116,18 @@ def isospin_mst(
 ) -> list[Fragment]:
     """Recognize fragments with isospin-dependent coordinate cutoffs.
 
+    The default cutoffs follow the iso-MST methodology used in imQMD MNT
+    studies (Li+2019 PRC 99, 034619; Li+2020 PLB 808, 135697): pp=3.0 fm,
+    nn=np=6.0 fm.  The factor-2 asymmetry between pp and nn/np reflects the
+    physical picture in near-barrier MNT where neutrons decouple from the
+    reaction dynamics later than protons (the lighter partner tends to emit
+    free neutrons that the MST should NOT merge into the heavy residue).
+    The 6.0 fm nn cutoff acts as a regulator: neutrons within this radius of
+    a fragment are assigned to it, preventing artefactual free-neutron
+    emission from the MST cut while still allowing genuine neutron evaporation
+    at the statistical-decay stage.  For sensitivity studies, the Li+2019
+    values of ~pp=3.0, nn=3.8, np=3.4 fm provide a tighter alternative.
+
     p_cut default 300 MeV/c (research report Sec. 4.5 MNT criterion).
     """
 

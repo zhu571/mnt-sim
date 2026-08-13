@@ -447,16 +447,17 @@ def _compute_occupation_field(
     nucleus: ImQMDNucleus,
     group_ids: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Compute Wigner phase-space occupation for every nucleon.
+    """Compute Wigner phase-space occupation for every nucleon (vectorized).
 
     Returns array of length nucleus.A with occupation numbers.
     Only same-species, same-group nucleons contribute.
+
+    For each (species, group) subset the full pairwise distance matrices are
+    precomputed via broadcasting, replacing the per-nucleon Python loop with a
+    single tensor expression.  For A=476 (U+U) this reduces the occupation
+    computation from ~476 scalar-distance passes to 2–4 dense (np×np) blocks,
+    each fully vectorised in numpy.
     """
-    positions = nucleus.positions
-    momenta = nucleus.momenta
-    is_proton = nucleus.is_proton
-    sigmas = nucleus.packet_sigmas
-    n = nucleus.A
 
     # h^3/2 phase-space cell (spin degeneracy 2, same-species sum):
     # occupation = 4 * sum(weights), same convention as the Pauli blocking
@@ -464,20 +465,43 @@ def _compute_occupation_field(
     # this same per-state occupation.
     scale = 4.0
 
+    positions = nucleus.positions
+    momenta = nucleus.momenta
+    is_proton = nucleus.is_proton
+    sigmas = nucleus.packet_sigmas
+    n = nucleus.A
     occupations = np.zeros(n, dtype=float)
-    for i in range(n):
-        if group_ids is not None:
-            mask = (nucleus.is_proton == is_proton[i]) & (group_ids == group_ids[i])
-        else:
-            mask = nucleus.is_proton == is_proton[i]
-        mask[i] = False
-        if not np.any(mask):
-            continue
-        s2, sp2 = _pair_effective_widths(sigmas[i], sigmas[mask])
-        dr2 = np.sum((positions[mask] - positions[i]) ** 2, axis=1)
-        dp2 = np.sum((momenta[mask] - momenta[i]) ** 2, axis=1)
-        weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
-        occupations[i] = scale * np.sum(weights) / FERMI_SOFTENING
+
+    groups = np.asarray(group_ids, dtype=int) if group_ids is not None else np.zeros(n, dtype=int)
+    unique_groups = np.unique(groups)
+
+    for grp in unique_groups:
+        for species, species_mask in (("p", is_proton), ("n", ~is_proton)):
+            subset_mask = species_mask & (groups == grp)
+            indices = np.flatnonzero(subset_mask)
+            np_val = len(indices)
+            if np_val < 2:
+                continue
+
+            r_sub = positions[indices]  # (np, 3)
+            p_sub = momenta[indices]     # (np, 3)
+            s_sub = sigmas[indices]      # (np,)
+
+            # Pairwise squared distances (np, np) from broadcasting
+            dr = r_sub[:, None, :] - r_sub[None, :, :]
+            dr2 = np.sum(dr * dr, axis=-1)
+            dp = p_sub[:, None, :] - p_sub[None, :, :]
+            dp2 = np.sum(dp * dp, axis=-1)
+
+            # Pair-averaged widths  σ_ik² = (σ_i² + σ_k²) / 2
+            s2 = 0.5 * (s_sub[:, None] ** 2 + s_sub[None, :] ** 2)  # (np, np)
+            sp2 = HBAR_C**2 / (4.0 * s2)
+
+            weights = np.exp(-dr2 / (2.0 * s2) - dp2 / (2.0 * sp2))
+            np.fill_diagonal(weights, 0.0)
+
+            occupations[indices] = scale * np.sum(weights, axis=1) / FERMI_SOFTENING
+
     return occupations
 
 

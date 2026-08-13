@@ -39,6 +39,13 @@ PARAMETER_SETS = {
     "IQ1": SkyrmeParameters("IQ1", -310.0, 258.0, 7.0 / 6.0, 19.8, 9.5, 2.0 / 3.0, 32.0, 0.08, 0.165, 0.49, 0.16),
     "IQ2": SkyrmeParameters("IQ2", -356.0, 303.0, 7.0 / 6.0, 7.0, 12.5, 2.0 / 3.0, 32.0, 0.08, 0.165, 0.88, 0.09),
     "IQ3": SkyrmeParameters("IQ3", -207.0, 138.0, 7.0 / 6.0, 18.0, 14.0, 5.0 / 3.0, 32.0, 0.08, 0.165, 0.94, 0.018),
+    # IQ3a/IQ3b: variants of IQ3 with enhanced surface-symmetry for isospin-sensitive
+    # observables (Li+2013 Chin. Phys. C 37, 114101 Sec. III; Yao+Wang 2017 PRC 95, 014607;
+    # Li+2019 PRC 99, 034619 uses IQ3a as default for MNT).  Compared to IQ3 (κs=0.08, C_s=32):
+    #   IQ3a: stronger surface-symmetry (κs=0.4) and surface tension (~8% softer, gsur=16.5)
+    #         for improved neutron-skin and isospin-drift dynamics in near-barrier MNT;
+    #         sigma1=0.020 gives ~1.06 fm width for 238U.
+    #   IQ3b: stiffer surface-symmetry (κs=0.6) variant, used for sensitivity studies.
     "IQ3A": SkyrmeParameters("IQ3a", -207.0, 138.0, 7.0 / 6.0, 16.5, 14.0, 5.0 / 3.0, 34.0, 0.4, 0.165, 0.94, 0.020),
     "IQ3B": SkyrmeParameters("IQ3b", -207.0, 138.0, 7.0 / 6.0, 18.0, 14.0, 5.0 / 3.0, 34.0, 0.6, 0.165, 0.94, 0.018),
     "SKP*": SkyrmeParameters("SkP*", -356.0, 303.0, 7.0 / 6.0, 19.5, 13.0, 2.0 / 3.0, 35.0, 0.65, 0.162, 0.94, 0.018),

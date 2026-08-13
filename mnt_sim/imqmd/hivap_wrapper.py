@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import warnings
 from functools import lru_cache
 
 import numpy as np
@@ -44,8 +45,8 @@ _MS_A1 = 15.4941
 _MS_A2 = 17.9439
 _MS_A3 = 0.7053
 _MS_CAY1 = 1.15303
-_MS_CAY2 = 200.0
-_MS_CAY3 = 11.0
+_MS_CAY2 = 0.0
+_MS_CAY3 = 200.0
 _MS_GAMMA = 1.7826
 _MS_MN = 8.07144
 _MS_MP = 7.28899
@@ -117,18 +118,48 @@ def separation_energy(z: int, a: int, hivap_dir: str | None = None) -> float | N
     return _ld_mass_excess(z - 1, a - 1) + _PROTON_MASS_EXCESS - _ld_mass_excess(z, a)
 
 
+def _check_hivap_ready(hivap_dir: str | None = None) -> list[str]:
+    """Return the names of missing HIVAP runtime files (empty when all present).
+
+    Verifies the binary plus the required data files exist before handing a
+    run off to the Fortran code, so callers can fail fast (and fall back to
+    the local evaporation chain) instead of discovering the breakage after a
+    subprocess launch.
+    """
+    hivap_dir = os.path.normpath(hivap_dir) if hivap_dir else _HIVAP_DIR
+    missing: list[str] = []
+    if not os.path.isfile(os.path.join(hivap_dir, "hivap.exe")):
+        missing.append("hivap.exe")
+    for name in _REQUIRED_FILES:
+        if not os.path.isfile(os.path.join(hivap_dir, name)):
+            missing.append(name)
+    return missing
+
+
 def _prepare_workspace(temp_dir: str) -> None:
     """Symlink or copy required data files into a temp workspace."""
     import shutil
 
     for name in _REQUIRED_FILES:
         src = os.path.join(_HIVAP_DIR, name)
-        if os.path.exists(src):
+        if not os.path.exists(src):
+            continue
+        try:
             os.symlink(src, os.path.join(temp_dir, name))
+        except OSError:
+            # Symlinks unavailable (e.g. restricted FS): copy instead.
+            shutil.copy2(src, os.path.join(temp_dir, name))
     # Copy the binary
     dst_exe = os.path.join(temp_dir, "hivap.exe")
     if not os.path.exists(dst_exe):
-        shutil.copy2(_HIVAP_EXE, dst_exe)
+        try:
+            shutil.copy2(_HIVAP_EXE, dst_exe)
+        except OSError:
+            warnings.warn(
+                f"hivap.exe not copied to workspace {temp_dir!r}; HIVAP will fall back",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
 
 def _parse_sigxpn(path: str, target_ecm: float) -> list[tuple[int, int, float]]:
@@ -242,7 +273,7 @@ def run_hivap(
         # Run HIVAP
         exe = os.path.join(tmpdir, "hivap.exe")
         try:
-            subprocess.run(
+            completed = subprocess.run(
                 [exe],
                 cwd=tmpdir,
                 capture_output=True,
@@ -254,6 +285,12 @@ def run_hivap(
         # Parse output.  The SIGXPN.DAT Ecm column echoes the value written
         # into input.dat, so the parse must use the corrected ecm, not e_star.
         sigxpn_path = os.path.join(tmpdir, "SIGXPN.DAT")
+        if completed.returncode != 0:
+            # Tolerate a non-zero exit code as long as the evaporation table
+            # was actually produced (HIVAP can exit non-zero after a full,
+            # usable run).  Only fall back when no output exists at all.
+            if not os.path.exists(sigxpn_path):
+                return []
         if not os.path.exists(sigxpn_path):
             return []
 
@@ -294,7 +331,18 @@ def sample_residue(
     """
     rng = rng or np.random.default_rng()
     # Round before the call so the lru_cache on run_hivap deduplicates.
-    channels = run_hivap(int(z_frag), int(a_frag), round(float(e_star), 1))
+    e_star_round = round(float(e_star), 1)
+    if z_frag > 4 and e_star_round > 0:
+        missing = _check_hivap_ready()
+        if missing:
+            warnings.warn(
+                "HIVAP runtime files missing ("
+                + ", ".join(missing)
+                + "); falling back to the local Weisskopf evaporation chain",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+    channels = run_hivap(int(z_frag), int(a_frag), e_star_round)
 
     if not channels:
         from .decay import evaporate_full
