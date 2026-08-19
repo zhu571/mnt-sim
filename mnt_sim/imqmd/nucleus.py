@@ -38,6 +38,7 @@ class ImQMDNucleus:
         self.edf = edf or SkyrmeEDF()
         self.reference_positions = None if reference_positions is None else np.asarray(reference_positions, dtype=float).copy()
         self.energy_offset = float(energy_offset)
+        self.grid_nuclear_scale = 1.0
         self.use_surface_term = True
         self.use_static_stabilizer = False
 
@@ -65,7 +66,19 @@ class ImQMDNucleus:
 
     @property
     def sigma_r(self) -> float:
-        return float(self.packets[0].sigma_r) if self.packets else 1.1
+        return float(self.packets[0].sigma_r) if self.packets else 1.3
+
+    @property
+    def packet_sigmas(self) -> np.ndarray:
+        """Per-packet wave packet widths (Wang 2002 Eq. (18): σ_r depends on A).
+
+        Projectile and target nuclei are relaxed with their own
+        σ_r = σ0 + σ1·A^(1/3); the combined system must keep the per-packet
+        values (essential for asymmetric systems), so density deposition,
+        EDF forces and Wigner kernels all consume this array.
+        """
+
+        return np.array([p.sigma_r for p in self.packets], dtype=float)
 
     def copy(self) -> "ImQMDNucleus":
         packets = [
@@ -73,10 +86,9 @@ class ImQMDNucleus:
             for p in self.packets
         ]
         copied = ImQMDNucleus(self.Z, self.N, packets, self.edf, self.reference_positions, self.energy_offset)
+        copied.grid_nuclear_scale = float(getattr(self, "grid_nuclear_scale", 1.0))
         copied.use_surface_term = bool(getattr(self, "use_surface_term", True))
         copied.use_static_stabilizer = bool(getattr(self, "use_static_stabilizer", False))
-        if hasattr(self, "_grid_eta"):
-            copied._grid_eta = self._grid_eta
         return copied
 
     def density(self, r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -87,9 +99,11 @@ class ImQMDNucleus:
 
         points = np.atleast_2d(np.asarray(r, dtype=float))
         pos = self.positions
+        sigmas = self.packet_sigmas
         diff = points[:, None, :] - pos[None, :, :]
-        norm = 1.0 / ((2.0 * np.pi * self.sigma_r**2) ** 1.5)
-        weights = norm * np.exp(-np.sum(diff * diff, axis=-1) / (2.0 * self.sigma_r**2))
+        # Per-packet Gaussian normalization/width (system-size-dependent σ_r).
+        norm = 1.0 / ((2.0 * np.pi * sigmas**2) ** 1.5)
+        weights = norm[None, :] * np.exp(-np.sum(diff * diff, axis=-1) / (2.0 * sigmas[None, :] ** 2))
         protons = self.is_proton
         rho_p = np.sum(weights[:, protons], axis=1)
         rho_n = np.sum(weights[:, ~protons], axis=1)
@@ -109,7 +123,14 @@ class ImQMDNucleus:
         use_surface_term: bool | None = None,
         use_static_stabilizer: bool | None = None,
     ) -> dict[str, float]:
-        """Return kinetic, potential, Coulomb, symmetry, and total energies."""
+        """Return kinetic, potential, Coulomb, symmetry, and total energies.
+
+        DEPRECATED (legacy centroid path): this compact centroid-sampled EDF
+        (including the pair-form surface terms) is kept for static tests and
+        diagnostics.  Production energies/forces use the GridEDF path
+        (``total_energy`` / ``propagator._snapshot``), which is the
+        self-consistent implementation.
+        """
 
         if use_surface_term is None:
             use_surface_term = bool(getattr(self, "use_surface_term", True))
@@ -149,11 +170,24 @@ class ImQMDNucleus:
         }
 
     def total_energy(self) -> float:
-        if hasattr(self, '_grid_eta'):
-            from .grid_edf import GridEDF
-            grid = GridEDF(self.edf.parameters, self.sigma_r, grid_spacing=1.0, eta=self._grid_eta)
-            return grid.total_energy(self.positions, self.momenta, self.is_proton, use_surface_term=True)['total']
-        return self.energy_components()["total"]
+        from .grid_edf import GridEDF
+
+        grid = GridEDF(
+            self.edf.parameters,
+            self.packet_sigmas,
+            grid_spacing=1.0,
+            nuclear_scale=float(getattr(self, "grid_nuclear_scale", 1.0)),
+        )
+        e_grid = grid.total_energy(
+            self.positions,
+            self.momenta,
+            self.is_proton,
+            use_surface_term=self.use_surface_term,
+        )["total"]
+        total = e_grid + self.energy_offset
+        if self.use_static_stabilizer:
+            total += self.edf.static_mean_field_energy(self.positions, self.reference_positions)
+        return float(total)
 
     def relative_energy_drift(self, reference_energy: float) -> float:
         """Return fractional total-energy drift from ``reference_energy``."""
@@ -164,14 +198,16 @@ class ImQMDNucleus:
         """Return proton and neutron RMS radii, including packet width."""
 
         pos = self.positions
+        sigmas = self.packet_sigmas
         mask = self.is_proton
 
-        def rms(subset: np.ndarray) -> float:
+        def rms(subset: np.ndarray, subset_sigmas: np.ndarray) -> float:
             if len(subset) == 0:
                 return 0.0
-            return float(np.sqrt(np.mean(np.sum(subset * subset, axis=1)) + 3.0 * self.sigma_r**2))
+            # Packet-width correction uses each packet's own σ_r.
+            return float(np.sqrt(np.mean(np.sum(subset * subset, axis=1)) + 3.0 * np.mean(subset_sigmas**2)))
 
-        return rms(pos[mask]), rms(pos[~mask])
+        return rms(pos[mask], sigmas[mask]), rms(pos[~mask], sigmas[~mask])
 
     def max_radius(self) -> float:
         return float(np.max(np.linalg.norm(self.positions, axis=1)))

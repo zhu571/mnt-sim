@@ -7,8 +7,8 @@ from itertools import combinations
 
 import numpy as np
 
-from .decay import binding_energy
 from .nucleus import GaussianPacket, ImQMDNucleus
+_COLD_GROUND_STATE_CACHE: dict[tuple[int, int, float, str, float], float] = {}
 
 
 @dataclass
@@ -82,12 +82,14 @@ def _pair_distances(values: np.ndarray) -> np.ndarray:
 def minimum_spanning_tree(
     nucleus: ImQMDNucleus,
     r_cut: float = 3.5,
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
 ) -> list[Fragment]:
     """Recognize fragments with the QMD minimum-spanning-tree rule.
 
     Despite the historical name, the algorithm returns connected components of
-    the phase-space proximity graph.
+    the phase-space proximity graph.  p_cut default 300 MeV/c follows the
+    imQMD MNT criterion (research report Sec. 4.5); the classic QMD value is
+    250 MeV/c (Aichelin 1991, Zhang 2020 review).
     """
 
     n = nucleus.A
@@ -107,9 +109,24 @@ def isospin_mst(
     r_cut_pp: float = 3.0,
     r_cut_nn: float = 6.0,
     r_cut_np: float = 6.0,
-    p_cut: float | None = 250.0,
+    p_cut: float | None = 300.0,
 ) -> list[Fragment]:
-    """Recognize fragments with isospin-dependent coordinate cutoffs."""
+    """Recognize fragments with isospin-dependent coordinate cutoffs.
+
+    The default cutoffs follow the iso-MST methodology used in imQMD MNT
+    studies (Li+2019 PRC 99, 034619; Li+2020 PLB 808, 135697): pp=3.0 fm,
+    nn=np=6.0 fm.  The factor-2 asymmetry between pp and nn/np reflects the
+    physical picture in near-barrier MNT where neutrons decouple from the
+    reaction dynamics later than protons (the lighter partner tends to emit
+    free neutrons that the MST should NOT merge into the heavy residue).
+    The 6.0 fm nn cutoff acts as a regulator: neutrons within this radius of
+    a fragment are assigned to it, preventing artefactual free-neutron
+    emission from the MST cut while still allowing genuine neutron evaporation
+    at the statistical-decay stage.  For sensitivity studies, the Li+2019
+    values of ~pp=3.0, nn=3.8, np=3.4 fm provide a tighter alternative.
+
+    p_cut default 300 MeV/c (research report Sec. 4.5 MNT criterion).
+    """
 
     n = nucleus.A
     if n == 0:
@@ -259,33 +276,66 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
     internal_positions = positions - r_cm
     internal_momenta = momenta - p_cm
 
-    if hasattr(nucleus, "_grid_eta"):
-        from .grid_edf import GridEDF
+    from .grid_edf import GridEDF
 
-        grid = GridEDF(nucleus.edf.parameters, nucleus.sigma_r, grid_spacing=1.0, eta=nucleus._grid_eta)
-        internal_energy = grid.total_energy(
-            internal_positions,
-            internal_momenta,
-            is_proton,
-            use_surface_term=True,
-        )["total"]
-    else:
-        packets = [
-            GaussianPacket(r.copy(), p.copy(), nucleus.sigma_r, bool(proton))
-            for r, p, proton in zip(internal_positions, internal_momenta, is_proton)
-        ]
-        sub = ImQMDNucleus(
-            int(fragment.Z),
-            int(fragment.A - fragment.Z),
-            packets,
-            edf=nucleus.edf,
-            reference_positions=None,
-            energy_offset=0.0,
-        )
-        internal_energy = sub.total_energy()
+    fragment_scale = fragment_ground_state_scale(fragment.Z, fragment.A, nucleus)
+    grid = GridEDF(
+        nucleus.edf.parameters,
+        nucleus.packet_sigmas[idx],
+        grid_spacing=1.0,
+        nuclear_scale=fragment_scale,
+    )
+    internal_energy = grid.total_energy(
+        internal_positions,
+        internal_momenta,
+        is_proton,
+        use_surface_term=True,
+    )["total"]
 
-    ground_state_energy = -binding_energy(fragment.Z, fragment.A)
-    return float(max(internal_energy - ground_state_energy, 0.0))
+    # Event records do not carry J, so rotational energy remains part of E*.
+    cold_energy = cold_ground_state_energy(fragment.Z, fragment.A, nucleus)
+    return float(internal_energy - cold_energy)
+
+
+def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
+    """Return the cached cold-nucleus energy from the same calibrated EDF."""
+
+    if A <= 1:
+        return 0.0
+    sigma_r = float(reference.sigma_r)
+    edf = reference.edf
+    cache_key = (
+        int(Z),
+        int(A),
+        round(sigma_r, 12),
+        edf.parameters.name,
+        float(edf.static_k),
+    )
+    cached = _COLD_GROUND_STATE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    from .initializer import initialize_nucleus
+    from .grid_edf import GridEDF
+
+    cold = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=1000 + 17 * int(Z) + int(A), edf=edf)
+    # The event uses its inherited scale; the model ground state uses the
+    # scale fitted when that cold nucleus was initialized with the same EDF.
+    scale = float(getattr(cold, "grid_nuclear_scale", 1.0))
+    grid = GridEDF(edf.parameters, sigma_r, grid_spacing=1.0, nuclear_scale=scale)
+    energy = grid.total_energy(
+        cold.positions, cold.momenta, cold.is_proton, use_surface_term=True
+    )["total"]
+    _COLD_GROUND_STATE_CACHE[cache_key] = float(energy)
+    return float(energy)
+
+
+def fragment_ground_state_scale(Z: int, A: int, reference: ImQMDNucleus) -> float:
+    """Use the scale carried by the initialized/evolved system."""
+
+    if A <= 1:
+        return 1.0
+    return float(getattr(reference, "grid_nuclear_scale", 1.0))
 
 
 __all__ = [
@@ -293,6 +343,8 @@ __all__ = [
     "adaptive_mst",
     "coalescence_light",
     "compute_fragment_excitation",
+    "cold_ground_state_energy",
+    "fragment_ground_state_scale",
     "isospin_mst",
     "minimum_spanning_tree",
     "reaction_fragments",

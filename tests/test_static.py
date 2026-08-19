@@ -26,6 +26,7 @@ def _run_stability(Z: int, A: int, dt: float = 2.0, time: float = 2000.0):
         sample_every=100,
         use_surface_term=True,
         use_static_stabilizer=True,
+        use_grid_edf=True,
     )
     final = history[-1]
     final_rms = 0.5 * (final["rms_p"] + final["rms_n"])
@@ -55,6 +56,7 @@ def test_single_nucleus_energy_conservation():
         sample_every=100,
         use_surface_term=True,
         use_static_stabilizer=True,
+        use_grid_edf=True,
     )
     e0 = history[0]["total"]
     e1 = history[-1]["total"]
@@ -73,6 +75,7 @@ def test_static_no_spring():
         remove_cm_drift=True,
         use_surface_term=True,
         use_static_stabilizer=False,
+        use_grid_edf=True,
     )
     final = history[-1]
     final_rms = 0.5 * (final["rms_p"] + final["rms_n"])
@@ -125,6 +128,7 @@ def test_final_state_pauli():
         collision_dt=1.0,
         use_surface_term=True,
         use_static_stabilizer=True,
+        use_grid_edf=True,
     )
     final = history[-1]
     final_rms = 0.5 * (final["rms_p"] + final["rms_n"])
@@ -156,6 +160,7 @@ def test_collision_rate_sanity():
         collision_dt=1.0,
         use_surface_term=True,
         use_static_stabilizer=True,
+        use_grid_edf=True,
     )
     stats = getattr(nucleus, "collision_stats", {"attempted": 0, "blocked": 0, "accepted": 0})
     assert stats["attempted"] > 0

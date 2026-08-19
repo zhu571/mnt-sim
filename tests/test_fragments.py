@@ -15,12 +15,18 @@ if str(ROOT) not in sys.path:
 from mnt_sim.imqmd import (  # noqa: E402
     GaussianPacket,
     ImQMDNucleus,
+    benchmark_evaporation_chain,
     coalescence_light,
     compute_fragment_excitation,
+    grid_energy_diagnostics,
+    evaporate_chain,
+    fission_competition,
+    impact_parameter_scan,
     initialize_nucleus,
     minimum_spanning_tree,
     propagate,
     reaction_fragments,
+    validate_neutron_separation_energies,
     weisskopf_evaporation,
 )
 
@@ -61,11 +67,32 @@ def test_coalescence_deuteron():
     assert any(cluster.Z == 1 and cluster.A == 2 for cluster in clusters)
 
 
-def test_excitation_energy_positive():
-    nucleus = initialize_nucleus(8, 16, sigma_r=1.1, seed=21)
+def test_cold_nucleus_excitation_is_zero():
+    Z, A = 8, 16
+    nucleus = initialize_nucleus(Z, A, sigma_r=1.1, seed=21)
     fragment = minimum_spanning_tree(nucleus, r_cut=3.0, p_cut=None)[0]
 
-    assert compute_fragment_excitation(nucleus, fragment) >= 0.0
+    assert abs(compute_fragment_excitation(nucleus, fragment)) < 0.1
+
+
+def test_heated_nucleus_excitation_is_positive():
+    Z, A = 8, 16
+    nucleus = initialize_nucleus(Z, A, sigma_r=1.1, seed=21)
+    fragment = minimum_spanning_tree(nucleus, r_cut=3.0, p_cut=None)[0]
+    momenta = nucleus.momenta
+    momenta[0, 0] += 50.0
+    momenta[1, 0] -= 50.0
+    nucleus.momenta = momenta
+
+    assert compute_fragment_excitation(nucleus, fragment) > 0.0
+
+
+def test_grid_energy_diagnostics_reports_scale():
+    diagnostics = grid_energy_diagnostics(20, 40, sigma_r=1.1, seed=40)
+
+    assert diagnostics["raw_total"] < diagnostics["target_total"]
+    assert 0.35 <= diagnostics["nuclear_scale"] <= 1.25
+    assert abs(diagnostics["scaled_total"] + diagnostics["energy_offset"] - diagnostics["target_total"]) < 5.0
 
 
 def test_evaporation_reduces_A():
@@ -75,6 +102,50 @@ def test_evaporation_reduces_A():
 
     assert evaporated
     assert mean_a < 40.0
+
+
+def test_evaporation_chain_cools_below_1mev():
+    chain = evaporate_chain(28, 64, 20.0, rng=np.random.default_rng(7))
+
+    assert chain.residue_Z <= 28
+    assert chain.residue_A <= 64
+    assert chain.residue_E_star < 1.0
+    assert chain.steps
+
+
+def test_fission_competition_rises_with_excitation():
+    low = fission_competition(92, 238, 10.0)
+    high = fission_competition(92, 238, 80.0)
+
+    assert 0.0 <= low <= 1.0
+    assert 0.0 <= high <= 1.0
+    assert high >= low
+
+
+def test_neutron_separation_matches_mass_table_sample():
+    discrepancies = validate_neutron_separation_energies(
+        nuclei=[(20, 40), (28, 64), (50, 132), (82, 208), (92, 238)],
+        warn=False,
+    )
+
+    assert discrepancies == []
+
+
+def test_evaporation_benchmark_reasonable():
+    benchmark = benchmark_evaporation_chain(
+        test_points=[(28, 64, 20.0), (92, 238, 60.0)],
+        n_trials=32,
+        seed=9,
+    )
+    by_nucleus = {(item["Z"], item["A"]): item for item in benchmark}
+
+    ni = by_nucleus[(28, 64)]
+    u = by_nucleus[(92, 238)]
+    assert 0.0 <= ni["fission_fraction"] == 0.0
+    assert ni["mean_residue_A"] <= 64.0
+    assert ni["mean_steps"] >= 1.0
+    assert 0.0 <= u["fission_fraction"] <= 1.0
+    assert u["mean_residue_A"] <= 238.0
 
 
 def test_cold_nucleus_few_fragments():
@@ -191,15 +262,45 @@ def test_mnt_event_has_transfer():
     assert any(fragment.Z != 92 for fragment in heavy)
 
 
+def test_krni_scan_pipeline_smoke():
+    if os.environ.get("RUN_SLOW_MNT_TESTS") != "1":
+        return
+
+    result = impact_parameter_scan(
+        projectile_z=36,
+        projectile_a=86,
+        target_z=28,
+        target_a=64,
+        energy_per_a=25.0,
+        b_values=[2.0, 4.0, 6.0],
+        events_per_b=10,
+        n_workers=1,
+        time_fm_c=400.0,
+        dt=1.0,
+        collision_dt=1.0,
+        fragment_method="iso-mst",
+    )
+
+    assert len(result.impact_parameter_results) == 3
+    assert result.total_cross_section > 0.0
+    assert any(z not in {28, 36} for z in result.dsigma_dz)
+
+
 if __name__ == "__main__":
     for test in (
         test_mst_two_fragments,
         test_coalescence_deuteron,
-        test_excitation_energy_positive,
+        test_cold_nucleus_excitation_is_zero,
+        test_heated_nucleus_excitation_is_positive,
         test_evaporation_reduces_A,
+        test_evaporation_chain_cools_below_1mev,
+        test_fission_competition_rises_with_excitation,
+        test_neutron_separation_matches_mass_table_sample,
+        test_evaporation_benchmark_reasonable,
         test_cold_nucleus_few_fragments,
         test_two_nucleus_collision_separates,
         test_mnt_event_has_transfer,
+        test_krni_scan_pipeline_smoke,
     ):
         test()
     print("Fragment and de-excitation checks passed")

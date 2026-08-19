@@ -1,6 +1,6 @@
-     U 238 + U 238
+     Ca 48 + 208 Pb
 -----------------------------------------------------------------------         
-  MPROJ= 238  ZPROJ= 92  MTARG= 238  ZTARG= 92                                  
+  MPROJ= 48  ZPROJ= 20  MTARG= 208  ZTARG= 82                                  
   ISHELL(GS)= 2  ISHELL(SADDLE)= 0  PAIRING= 0  MC= 0  MP= 0                    
   IBF= 1  FISROT PARAMETERS= 3   for empirical value                                                  
   NOFISSION= 0  NONEUTRONS= 0  NOPROTONS= 0  NOALPHAS= 0 NO GAMMAS= 0           
