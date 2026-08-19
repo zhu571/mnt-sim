@@ -8,10 +8,7 @@ from itertools import combinations
 import numpy as np
 
 from .nucleus import GaussianPacket, ImQMDNucleus
-from .skyrme import M_N
-
 _COLD_GROUND_STATE_CACHE: dict[tuple[int, int, float, str, float], float] = {}
-_FRAGMENT_SCALE_CACHE: dict[tuple[int, int, float, str, float], float] = {}
 
 
 @dataclass
@@ -278,7 +275,6 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
     r_cm = np.mean(positions, axis=0)
     internal_positions = positions - r_cm
     internal_momenta = momenta - p_cm
-    internal_momenta = _subtract_collective_rotation(internal_positions, internal_momenta)
 
     from .grid_edf import GridEDF
 
@@ -296,32 +292,13 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
         use_surface_term=True,
     )["total"]
 
-    from .decay import binding_energy
-
-    cold_energy = -binding_energy(fragment.Z, fragment.A)
-    return float(max(internal_energy - cold_energy, 0.0))
-
-
-def _subtract_collective_rotation(positions: np.ndarray, momenta: np.ndarray) -> np.ndarray:
-    if len(positions) <= 1:
-        return np.asarray(momenta, dtype=float)
-    r = np.asarray(positions, dtype=float)
-    p = np.asarray(momenta, dtype=float)
-    angular_momentum = np.sum(np.cross(r, p), axis=0)
-    inertia = np.zeros((3, 3), dtype=float)
-    for r_i in r:
-        r2 = float(np.dot(r_i, r_i))
-        inertia += M_N * (r2 * np.eye(3) - np.outer(r_i, r_i))
-    try:
-        omega = np.linalg.solve(inertia + 1.0e-8 * np.eye(3), angular_momentum)
-    except np.linalg.LinAlgError:
-        omega = np.zeros(3, dtype=float)
-    rotational_momenta = M_N * np.cross(omega, r)
-    return p - rotational_momenta
+    # Event records do not carry J, so rotational energy remains part of E*.
+    cold_energy = cold_ground_state_energy(fragment.Z, fragment.A, nucleus)
+    return float(internal_energy - cold_energy)
 
 
 def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
-    """Return cached calibrated cold-nucleus energy for the same EDF scale."""
+    """Return the cached cold-nucleus energy from the same calibrated EDF."""
 
     if A <= 1:
         return 0.0
@@ -342,8 +319,9 @@ def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
     from .grid_edf import GridEDF
 
     cold = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=1000 + 17 * int(Z) + int(A), edf=edf)
-    # Use same GridEDF energy scale as compute_fragment_excitation
-    scale = fragment_ground_state_scale(Z, A, reference)
+    # The event uses its inherited scale; the model ground state uses the
+    # scale fitted when that cold nucleus was initialized with the same EDF.
+    scale = float(getattr(cold, "grid_nuclear_scale", 1.0))
     grid = GridEDF(edf.parameters, sigma_r, grid_spacing=1.0, nuclear_scale=scale)
     energy = grid.total_energy(
         cold.positions, cold.momenta, cold.is_proton, use_surface_term=True
@@ -353,27 +331,11 @@ def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
 
 
 def fragment_ground_state_scale(Z: int, A: int, reference: ImQMDNucleus) -> float:
+    """Use the scale carried by the initialized/evolved system."""
+
     if A <= 1:
         return 1.0
-    sigma_r = float(reference.sigma_r)
-    edf = reference.edf
-    cache_key = (
-        int(Z),
-        int(A),
-        round(sigma_r, 12),
-        edf.parameters.name,
-        float(edf.static_k),
-    )
-    cached = _FRAGMENT_SCALE_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    from .initializer import initialize_nucleus
-
-    cold = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=1000 + 17 * int(Z) + int(A), edf=edf)
-    scale = float(getattr(cold, "grid_nuclear_scale", 1.0))
-    _FRAGMENT_SCALE_CACHE[cache_key] = scale
-    return scale
+    return float(getattr(reference, "grid_nuclear_scale", 1.0))
 
 
 __all__ = [

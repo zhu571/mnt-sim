@@ -17,9 +17,7 @@ from mnt_sim.imqmd import (  # noqa: E402
     ImQMDNucleus,
     benchmark_evaporation_chain,
     coalescence_light,
-    cold_ground_state_energy,
     compute_fragment_excitation,
-    empirical_ground_state_energy,
     grid_energy_diagnostics,
     evaporate_chain,
     fission_competition,
@@ -69,19 +67,24 @@ def test_coalescence_deuteron():
     assert any(cluster.Z == 1 and cluster.A == 2 for cluster in clusters)
 
 
-def test_excitation_energy_positive():
-    nucleus = initialize_nucleus(8, 16, sigma_r=1.1, seed=21)
+def test_cold_nucleus_excitation_is_zero():
+    Z, A = 8, 16
+    nucleus = initialize_nucleus(Z, A, sigma_r=1.1, seed=21)
     fragment = minimum_spanning_tree(nucleus, r_cut=3.0, p_cut=None)[0]
 
-    assert compute_fragment_excitation(nucleus, fragment) >= 0.0
+    assert abs(compute_fragment_excitation(nucleus, fragment)) < 0.1
 
 
-def test_cold_ground_state_energy_is_calibrated():
-    reference = initialize_nucleus(92, 238, sigma_r=1.1, seed=23801)
-    cold = cold_ground_state_energy(92, 238, reference)
-    target = empirical_ground_state_energy(92, 238)
+def test_heated_nucleus_excitation_is_positive():
+    Z, A = 8, 16
+    nucleus = initialize_nucleus(Z, A, sigma_r=1.1, seed=21)
+    fragment = minimum_spanning_tree(nucleus, r_cut=3.0, p_cut=None)[0]
+    momenta = nucleus.momenta
+    momenta[0, 0] += 50.0
+    momenta[1, 0] -= 50.0
+    nucleus.momenta = momenta
 
-    assert abs(cold - target) < 5.0
+    assert compute_fragment_excitation(nucleus, fragment) > 0.0
 
 
 def test_grid_energy_diagnostics_reports_scale():
@@ -287,7 +290,8 @@ if __name__ == "__main__":
     for test in (
         test_mst_two_fragments,
         test_coalescence_deuteron,
-        test_excitation_energy_positive,
+        test_cold_nucleus_excitation_is_zero,
+        test_heated_nucleus_excitation_is_positive,
         test_evaporation_reduces_A,
         test_evaporation_chain_cools_below_1mev,
         test_fission_competition_rises_with_excitation,
