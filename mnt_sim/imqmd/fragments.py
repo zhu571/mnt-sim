@@ -294,7 +294,10 @@ def compute_fragment_excitation(nucleus: ImQMDNucleus, fragment: Fragment) -> fl
 
     # Event records do not carry J, so rotational energy remains part of E*.
     cold_energy = cold_ground_state_energy(fragment.Z, fragment.A, nucleus)
-    return float(internal_energy - cold_energy)
+    # ponytail: A-weighted entrance offset; track packet origins if asymmetric
+    # projectile/target calibration offsets measurably bias fragment E*.
+    fragment_offset = nucleus.energy_offset * fragment.A / nucleus.A
+    return float(internal_energy + fragment_offset - cold_energy)
 
 
 def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
@@ -319,23 +322,19 @@ def cold_ground_state_energy(Z: int, A: int, reference: ImQMDNucleus) -> float:
     from .grid_edf import GridEDF
 
     cold = initialize_nucleus(Z, A, sigma_r=sigma_r, seed=1000 + 17 * int(Z) + int(A), edf=edf)
-    # The event uses its inherited scale; the model ground state uses the
-    # scale fitted when that cold nucleus was initialized with the same EDF.
-    scale = float(getattr(cold, "grid_nuclear_scale", 1.0))
-    grid = GridEDF(edf.parameters, sigma_r, grid_spacing=1.0, nuclear_scale=scale)
-    energy = grid.total_energy(
+    grid = GridEDF(edf.parameters, sigma_r, grid_spacing=1.0, nuclear_scale=1.0)
+    raw_energy = grid.total_energy(
         cold.positions, cold.momenta, cold.is_proton, use_surface_term=True
     )["total"]
-    _COLD_GROUND_STATE_CACHE[cache_key] = float(energy)
-    return float(energy)
+    energy = float(raw_energy + cold.energy_offset)
+    _COLD_GROUND_STATE_CACHE[cache_key] = energy
+    return energy
 
 
 def fragment_ground_state_scale(Z: int, A: int, reference: ImQMDNucleus) -> float:
-    """Use the scale carried by the initialized/evolved system."""
+    """Use the unmodified EDF for fragment internal energies."""
 
-    if A <= 1:
-        return 1.0
-    return float(getattr(reference, "grid_nuclear_scale", 1.0))
+    return 1.0
 
 
 __all__ = [

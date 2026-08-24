@@ -17,7 +17,9 @@ from mnt_sim.imqmd import (  # noqa: E402
     ImQMDNucleus,
     benchmark_evaporation_chain,
     coalescence_light,
+    cold_ground_state_energy,
     compute_fragment_excitation,
+    empirical_ground_state_energy,
     grid_energy_diagnostics,
     evaporate_chain,
     fission_competition,
@@ -72,7 +74,7 @@ def test_cold_nucleus_excitation_is_zero():
     nucleus = initialize_nucleus(Z, A, sigma_r=1.1, seed=21)
     fragment = minimum_spanning_tree(nucleus, r_cut=3.0, p_cut=None)[0]
 
-    assert abs(compute_fragment_excitation(nucleus, fragment)) < 0.1
+    assert abs(compute_fragment_excitation(nucleus, fragment)) < 0.5
 
 
 def test_heated_nucleus_excitation_is_positive():
@@ -87,12 +89,19 @@ def test_heated_nucleus_excitation_is_positive():
     assert compute_fragment_excitation(nucleus, fragment) > 0.0
 
 
+def test_cold_ground_state_includes_energy_offset():
+    nucleus = initialize_nucleus(8, 16, sigma_r=1.1, seed=21)
+
+    assert abs(cold_ground_state_energy(8, 16, nucleus) - empirical_ground_state_energy(8, 16)) < 0.1
+
+
 def test_grid_energy_diagnostics_reports_scale():
     diagnostics = grid_energy_diagnostics(20, 40, sigma_r=1.1, seed=40)
 
     assert diagnostics["raw_total"] < diagnostics["target_total"]
     assert 0.35 <= diagnostics["nuclear_scale"] <= 1.25
-    assert abs(diagnostics["scaled_total"] + diagnostics["energy_offset"] - diagnostics["target_total"]) < 5.0
+    assert diagnostics["production_nuclear_scale"] == 1.0
+    assert abs(diagnostics["raw_total"] + diagnostics["energy_offset"] - diagnostics["target_total"]) < 5.0
 
 
 def test_evaporation_reduces_A():

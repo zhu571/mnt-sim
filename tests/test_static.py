@@ -85,6 +85,26 @@ def test_static_no_spring():
     assert abs(e1 - e0) / max(abs(e0), 1.0) < 0.15
 
 
+def test_initialization_keeps_physical_grid_scale():
+    nucleus = initialize_nucleus(20, 40, sigma_r=1.1, seed=40)
+
+    assert nucleus.grid_nuclear_scale == 1.0
+
+
+def test_collision_preserves_offsets_without_scaling_mean_field(monkeypatch):
+    from mnt_sim.imqmd import reaction
+
+    def prepared(Z, A, sigma_r, seed, relax_time, edf):
+        packet = GaussianPacket(np.zeros(3), np.zeros(3), sigma_r, bool(Z))
+        return ImQMDNucleus(Z, A - Z, [packet], energy_offset=10.0 + Z)
+
+    monkeypatch.setattr(reaction, "_prepared_nucleus", prepared)
+    system = reaction.make_collision_event(1, 1, 0, 1, 1.0, 0.0, 1, 2, 3, separation=10.0)
+
+    assert system.grid_nuclear_scale == 1.0
+    assert system.energy_offset == 21.0
+
+
 def test_physical_energy_force_consistency():
     packets = [
         GaussianPacket(np.array([-1.0, 0.0, 0.0]), np.zeros(3), 1.1, True),

@@ -228,14 +228,10 @@ def make_collision_event(
         packets,
         edf=edf,
         reference_positions=np.asarray(reference_positions, dtype=float),
+        energy_offset=projectile.energy_offset + target.energy_offset,
     )
-    system.grid_nuclear_scale = float(
-        (
-            projectile.A * float(getattr(projectile, "grid_nuclear_scale", 1.0))
-            + target.A * float(getattr(target, "grid_nuclear_scale", 1.0))
-        )
-        / max(projectile.A + target.A, 1)
-    )
+    # Energy zero-point calibration must not weaken the collision mean field.
+    system.grid_nuclear_scale = 1.0
     system.reference_group_ids = np.asarray(reference_group_ids, dtype=int)
     system._collision_rng = np.random.default_rng(int(collision_seed))
     system.collision_stats = {"attempted": 0, "blocked": 0, "accepted": 0}
