@@ -367,4 +367,21 @@ def sample_residue(
     return zf, af
 
 
-__all__ = ["run_hivap", "sample_residue", "separation_energy"]
+def residue_branches(
+    z_frag: int,
+    a_frag: int,
+    e_star: float,
+    rng: np.random.Generator | None = None,
+) -> list[tuple[int, int, float]]:
+    """Return every HIVAP evaporation-residue branch with its probability."""
+    channels = run_hivap(int(z_frag), int(a_frag), round(float(e_star), 1))
+    if channels:
+        return [(z, a, p) for z, a, p in channels if z >= 0 and p > 0.0]
+
+    from .decay import evaporate_full
+
+    zf, af = evaporate_full(z_frag, a_frag, e_star, rng=rng)
+    return [(zf, af, 1.0)]
+
+
+__all__ = ["residue_branches", "run_hivap", "sample_residue", "separation_energy"]

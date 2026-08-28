@@ -33,6 +33,7 @@ class EventFragmentRecord:
     final_A: int
     e_lab: float = 0.0
     theta_lab: float = 0.0
+    branch_probability: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,9 @@ class ImpactParameterEvent:
     primary_fragments: tuple[EventFragmentRecord, ...]
     accepted_collisions: int
     attempted_collisions: int
+    is_reactive: bool | None = None
+    reseparation_time: float | None = None
+    dynamics_time: float | None = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,7 @@ class CrossSectionScanResult:
     total_cross_section: float
     dsigma_da: dict = None  # ponytail: mass distribution, populated post-init
     dsigma_za: dict = None  # ponytail: isotope yield {(Z,A): sigma}
-    d2sigma: tuple | None = None  # (theta_grid, e_grid, array)
+    d2sigma: tuple | None = None  # (theta edges, energy edges, mb/(MeV sr) array)
     dsigma_dz_light: dict = None  # Z<=2 light-particle yield, kept out of dsigma_dz
     dsigma_dz_err: dict = None  # Poisson error per Z: sqrt(sum_b w_b^2 * n_Z(b))
     total_cross_section_err: float = 0.0  # Poisson error on sigma_R
@@ -273,30 +277,76 @@ def _record_fragment(
     fragment: Fragment,
     rng: np.random.Generator,
     use_hivap: bool = False,
-) -> EventFragmentRecord | None:
+) -> tuple[EventFragmentRecord, ...]:
     if use_hivap:
-        from .hivap_wrapper import sample_residue
+        from .hivap_wrapper import residue_branches
 
-        residue = sample_residue(
-            fragment.Z, fragment.A, fragment.excitation_energy, rng=rng
-        )
-        if residue is None:
-            # The fragment fissioned: HIVAP has no evaporation residue for
-            # it (sigma_er = 0 channel).  Skip it rather than recording the
-            # un-decayed parent, which would pollute dsigma/dZ.
-            return None
-        final_Z, final_A = residue
+        branches = residue_branches(fragment.Z, fragment.A, fragment.excitation_energy, rng=rng)
     else:
         final_Z, final_A = evaporate_full(
             fragment.Z, fragment.A, fragment.excitation_energy, rng=rng
         )
-    return EventFragmentRecord(
-        Z=int(fragment.Z),
-        A=int(fragment.A),
-        excitation_energy=float(fragment.excitation_energy),
-        final_Z=int(final_Z),
-        final_A=int(final_A),
+        branches = [(final_Z, final_A, 1.0)]
+    return tuple(
+        EventFragmentRecord(
+            Z=int(fragment.Z),
+            A=int(fragment.A),
+            excitation_energy=float(fragment.excitation_energy),
+            final_Z=int(final_Z),
+            final_A=int(final_A),
+            branch_probability=float(probability),
+        )
+        for final_Z, final_A, probability in branches
     )
+
+
+def _group_center_separation(system: ImQMDNucleus) -> float:
+    groups = np.asarray(system.reference_group_ids)
+    return float(np.linalg.norm(np.mean(system.positions[groups == 0], axis=0) - np.mean(system.positions[groups == 1], axis=0)))
+
+
+def _propagate_through_reseparation(
+    system: ImQMDNucleus,
+    time_fm_c: float,
+    dt: float,
+    collision_dt: float,
+    use_grid_edf: bool,
+    separation_threshold: float,
+    post_reseparation_time: float,
+) -> tuple[float | None, float]:
+    """Evolve until reseparation, then for the requested post-separation time."""
+    elapsed = 0.0
+    previous = _group_center_separation(system)
+    contacted = previous <= separation_threshold
+    reseparation_time = None
+    chunk_steps = max(1, int(round(10.0 / dt)))
+    max_steps = max(1, int(round(time_fm_c / dt)))
+    while elapsed < time_fm_c:
+        steps = min(chunk_steps, max_steps - int(round(elapsed / dt)))
+        if steps <= 0:
+            break
+        propagate(
+            system, dt=dt, n_steps=steps, sample_every=steps + 1,
+            with_collisions=True, collision_dt=collision_dt, remove_cm_drift=False,
+            use_surface_term=True, use_static_stabilizer=False, use_grid_edf=use_grid_edf,
+        )
+        elapsed += steps * dt
+        current = _group_center_separation(system)
+        contacted = contacted or current <= separation_threshold
+        if contacted and current > separation_threshold and current > previous:
+            reseparation_time = elapsed
+            break
+        previous = current
+
+    if reseparation_time is not None and post_reseparation_time > 0.0:
+        steps = max(1, int(round(post_reseparation_time / dt)))
+        propagate(
+            system, dt=dt, n_steps=steps, sample_every=steps + 1,
+            with_collisions=True, collision_dt=collision_dt, remove_cm_drift=False,
+            use_surface_term=True, use_static_stabilizer=False, use_grid_edf=use_grid_edf,
+        )
+        elapsed += steps * dt
+    return reseparation_time, elapsed
 
 
 def run_imqmd_event(
@@ -326,14 +376,16 @@ def run_imqmd_event(
     resample_initial_nuclei: bool = False,
     use_grid_edf: bool = True,
     use_hivap: bool = False,
+    post_reseparation_time: float = 1000.0,
+    reseparation_threshold: float | None = None,
 ) -> ImpactParameterEvent:
     """Run one ImQMD event through fragment recognition and de-excitation.
 
-    time_fm_c is the dynamics->statistical-decay switch time; the default
-    500 fm/c follows the imQMD+GEMINI/HIVAP optimum found in the MNT studies
-    (research report Sec. 4.6): primary fragments are formed but still
-    excited.  relax_time=None selects the A-dependent default (800/3000
-    fm/c, report Sec. 4.2).
+    ``time_fm_c`` is the maximum time used to find reseparation.  After the
+    two entrance-channel groups contact and separate beyond the grazing
+    distance, dynamics continues for ``post_reseparation_time`` (1000 fm/c,
+    Zhao 2016).  If no reseparation is found, the legacy fixed-time evolution
+    plus cooling is retained.
     """
 
     seed_offset = int(event_index + round(10.0 * impact_parameter))
@@ -354,17 +406,15 @@ def run_imqmd_event(
         relax_time=relax_time,
         edf=edf,
     )
-    propagate(
+    threshold = estimate_grazing_bmax(projectile_z, projectile_a, target_z, target_a) if reseparation_threshold is None else float(reseparation_threshold)
+    reseparation_time, dynamics_time = _propagate_through_reseparation(
         system,
+        time_fm_c=float(time_fm_c),
         dt=float(dt),
-        n_steps=max(1, int(round(float(time_fm_c) / float(dt)))),
-        sample_every=max(1, int(round(100.0 / float(dt)))),
-        with_collisions=True,
         collision_dt=float(collision_dt),
-        remove_cm_drift=False,
-        use_surface_term=True,
-        use_static_stabilizer=False,
         use_grid_edf=use_grid_edf,
+        separation_threshold=threshold,
+        post_reseparation_time=float(post_reseparation_time),
     )
     # 250 fm/c collisionless cooling before fragment recognition (was
     # 50 fm/c).  The short cooling left the system hot, inflating the MST
@@ -372,11 +422,13 @@ def run_imqmd_event(
     # configuration re-separate and damps internal motion.  The Fermi
     # (phase-space occupation) constraint stays active during cooling
     # (report Sec. 4.3 — it is part of every propagation step now).
-    cooling_steps = max(1, int(round(250.0 / float(dt))))
-    propagate(system, dt=float(dt), n_steps=cooling_steps, sample_every=cooling_steps + 1,
-              with_collisions=False, remove_cm_drift=False,
-              use_surface_term=True, use_static_stabilizer=False,
-              use_grid_edf=use_grid_edf)
+    if reseparation_time is None:
+        cooling_steps = max(1, int(round(250.0 / float(dt))))
+        propagate(system, dt=float(dt), n_steps=cooling_steps, sample_every=cooling_steps + 1,
+                  with_collisions=False, remove_cm_drift=False,
+                  use_surface_term=True, use_static_stabilizer=False,
+                  use_grid_edf=use_grid_edf)
+        dynamics_time += cooling_steps * float(dt)
     fragments = identify_fragments(
         system,
         method=fragment_method,
@@ -392,19 +444,16 @@ def run_imqmd_event(
     v_cm = np.array([np.sqrt(2.0 * energy_per_a * M_N) * projectile_a / ((projectile_a + target_a) * M_N), 0.0, 0.0])
     raw_records = []
     for fragment in fragments:
-        rec = _record_fragment(fragment, decay_rng, use_hivap=use_hivap)
-        if rec is None:
-            # Fragment fissioned and produced no evaporation residue; it
-            # contributes neither to fragment sigma nor to the light yield.
-            continue
         v_f_cm = fragment.momentum / (fragment.A * M_N)
         v_lab = v_cm + v_f_cm
         e_lab = 0.5 * fragment.A * M_N * np.dot(v_lab, v_lab)
         theta_lab = np.degrees(np.arctan2(np.linalg.norm(v_lab[1:]), v_lab[0]))
-        raw_records.append(EventFragmentRecord(
-            Z=rec.Z, A=rec.A, excitation_energy=rec.excitation_energy,
-            final_Z=rec.final_Z, final_A=rec.final_A,
-            e_lab=float(e_lab), theta_lab=float(theta_lab)))
+        for rec in _record_fragment(fragment, decay_rng, use_hivap=use_hivap):
+            raw_records.append(EventFragmentRecord(
+                Z=rec.Z, A=rec.A, excitation_energy=rec.excitation_energy,
+                final_Z=rec.final_Z, final_A=rec.final_A,
+                e_lab=float(e_lab), theta_lab=float(theta_lab),
+                branch_probability=rec.branch_probability))
     records = tuple(raw_records)
     collision_stats = getattr(system, "collision_stats", {})
     return ImpactParameterEvent(
@@ -413,6 +462,15 @@ def run_imqmd_event(
         primary_fragments=records,
         accepted_collisions=int(collision_stats.get("accepted", 0)),
         attempted_collisions=int(collision_stats.get("attempted", 0)),
+        is_reactive=_is_reactive_event(
+            [(int(fragment.Z), int(fragment.A)) for fragment in fragments if fragment.Z > LIGHT_FRAGMENT_Z_MAX],
+            projectile_z,
+            projectile_a,
+            target_z,
+            target_a,
+        ),
+        reseparation_time=reseparation_time,
+        dynamics_time=dynamics_time,
     )
 
 
@@ -482,6 +540,8 @@ def impact_parameter_scan(
     resample_initial_nuclei: bool = False,
     use_grid_edf: bool = True,
     use_hivap: bool = False,
+    post_reseparation_time: float = 1000.0,
+    reseparation_threshold: float | None = None,
 ) -> CrossSectionScanResult:
     """Run an impact-parameter scan and accumulate ``dσ/dZ``.
 
@@ -528,6 +588,8 @@ def impact_parameter_scan(
                     "resample_initial_nuclei": bool(resample_initial_nuclei),
                     "use_grid_edf": bool(use_grid_edf),
                     "use_hivap": bool(use_hivap),
+                    "post_reseparation_time": float(post_reseparation_time),
+                    "reseparation_threshold": reseparation_threshold,
                 }
             )
 
@@ -552,7 +614,7 @@ def impact_parameter_scan(
     var_reaction = 0.0
     sigma_reaction = 0.0
 
-    # d2sigma binning for heavy (MNT) products.  The full angular range is
+    # d2sigma/dE/dOmega binning for heavy (MNT) products.  The full angular range is
     # kept — theta_lab > 90 deg is physical backward scattering — and the
     # energy grid reaches 2000 MeV so the quasi-elastic peak
     # (~7 MeV/A * 238 = 1666 MeV minus TKE loss) is not truncated.
@@ -564,41 +626,47 @@ def impact_parameter_scan(
         events = sorted(by_b.get(float(b), []), key=lambda item: item.event_index)
         sigma_by_z: dict[int, float] = defaultdict(float)
         light_by_z: dict[int, float] = defaultdict(float)
-        count_by_z: dict[int, int] = defaultdict(int)
+        count_by_z: dict[int, float] = defaultdict(float)
         n_reactive = 0
         if events:
-            weight = 2.0 * np.pi * float(b) * float(width) / float(len(events))
+            # 1 fm^2 = 10 mb.
+            weight = 10.0 * 2.0 * np.pi * float(b) * float(width) / float(len(events))
             for event in events:
                 heavy = [f for f in event.primary_fragments if int(f.final_Z) > LIGHT_FRAGMENT_Z_MAX]
-                if _is_reactive_event(
+                is_reactive = event.is_reactive if event.is_reactive is not None else _is_reactive_event(
                     [(int(f.final_Z), int(f.final_A)) for f in heavy],
                     projectile_z,
                     projectile_a,
                     target_z,
                     target_a,
-                ):
+                )
+                if is_reactive:
                     sigma_reaction += weight
                     n_reactive += 1
                 for fragment in heavy:
-                    sigma_by_z[int(fragment.final_Z)] += weight
-                    sigma_total_by_z[int(fragment.final_Z)] += weight
-                    sigma_total_by_a[int(fragment.final_A)] += weight
-                    sigma_total_by_za[(int(fragment.final_Z), int(fragment.final_A))] += weight
-                    count_by_z[int(fragment.final_Z)] += 1
-                    var_total_by_z[int(fragment.final_Z)] += weight * weight
+                    fragment_weight = weight * fragment.branch_probability
+                    sigma_by_z[int(fragment.final_Z)] += fragment_weight
+                    sigma_total_by_z[int(fragment.final_Z)] += fragment_weight
+                    sigma_total_by_a[int(fragment.final_A)] += fragment_weight
+                    sigma_total_by_za[(int(fragment.final_Z), int(fragment.final_A))] += fragment_weight
+                    count_by_z[int(fragment.final_Z)] += fragment.branch_probability**2
+                    var_total_by_z[int(fragment.final_Z)] += fragment_weight * fragment_weight
                     if fragment.e_lab > 0:
                         it = np.clip(np.digitize(fragment.theta_lab, theta_grid) - 1, 0, 89)
                         ie = np.clip(np.digitize(fragment.e_lab, e_grid) - 1, 0, 79)
-                        d2[it, ie] += weight
+                        d_energy = e_grid[ie + 1] - e_grid[ie]
+                        d_omega = 2.0 * np.pi * (np.cos(np.radians(theta_grid[it])) - np.cos(np.radians(theta_grid[it + 1])))
+                        d2[it, ie] += fragment_weight / (d_energy * d_omega)
                 # Light particles (Z<=2) are tracked separately as yields.
                 for fragment in event.primary_fragments:
                     if int(fragment.final_Z) <= LIGHT_FRAGMENT_Z_MAX:
                         z = int(fragment.final_Z)
-                        light_by_z[z] += weight
-                        sigma_light_by_z[z] += weight
+                        fragment_weight = weight * fragment.branch_probability
+                        light_by_z[z] += fragment_weight
+                        sigma_light_by_z[z] += fragment_weight
             var_reaction += n_reactive * weight * weight
         # Poisson errors at this b: delta_sigma = w_b * sqrt(count).
-        w_b = 2.0 * np.pi * float(b) * float(width) / float(len(events)) if events else 0.0
+        w_b = 10.0 * 2.0 * np.pi * float(b) * float(width) / float(len(events)) if events else 0.0
         sigma_by_z_err = {z: float(w_b * np.sqrt(count_by_z[z])) for z in sigma_by_z}
         total_sigma_err = float(w_b * np.sqrt(sum(count_by_z.values()))) if events else 0.0
         ordered_results.append(

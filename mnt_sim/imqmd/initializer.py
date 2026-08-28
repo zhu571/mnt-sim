@@ -14,6 +14,7 @@ from .skyrme import HBAR_C, M_N, SkyrmeEDF, SkyrmeParameters
 
 _INITIALIZE_CACHE: dict[tuple[int, int, float, int | None, str, float], ImQMDNucleus] = {}
 _BE_ACCEPTANCE_TOLERANCE_MEV = 0.05
+_U238_DEFORMATION = (0.215, 0.093)
 
 
 def _relax_with_friction_cutoff(
@@ -91,6 +92,36 @@ def _sample_hard_sphere(rng: np.random.Generator, count: int, radius: float, min
     return np.asarray(points, dtype=float)
 
 
+def _sample_deformed_hard_sphere(
+    rng: np.random.Generator,
+    count: int,
+    radius: float,
+    min_dist: float,
+    beta2: float,
+    beta4: float,
+) -> np.ndarray:
+    """Sample a sharp axial surface R(θ)=R0[1+β2Y20+β4Y40]."""
+    points: list[np.ndarray] = []
+    attempts = 0
+    max_radius = radius * (1.0 + abs(beta2) * np.sqrt(5.0 / (4.0 * np.pi)) + abs(beta4) * 3.0 / np.sqrt(4.0 * np.pi))
+    while len(points) < count:
+        attempts += 1
+        if attempts > 250000:
+            min_dist *= 0.95
+            attempts = 0
+        candidate = rng.uniform(-max_radius, max_radius, size=3)
+        r = np.linalg.norm(candidate)
+        cos_theta = candidate[2] / r if r else 1.0
+        y20 = np.sqrt(5.0 / (16.0 * np.pi)) * (3.0 * cos_theta**2 - 1.0)
+        y40 = 3.0 / (16.0 * np.sqrt(np.pi)) * (35.0 * cos_theta**4 - 30.0 * cos_theta**2 + 3.0)
+        if r > radius * (1.0 + beta2 * y20 + beta4 * y40):
+            continue
+        if points and np.min(np.linalg.norm(np.asarray(points) - candidate, axis=1)) < min_dist:
+            continue
+        points.append(candidate)
+    return np.asarray(points, dtype=float)
+
+
 def _fermi_momenta(
     positions: np.ndarray,
     is_proton: np.ndarray,
@@ -150,8 +181,13 @@ def _sample_grid_positions(
     min_dist = min(0.85, max(0.45, 0.75 * sigma_r))
     proton_radius = max(r_p - 0.8, min_dist)
     neutron_radius = max(r_n - 0.8, min_dist)
-    proton_positions = _sample_hard_sphere(rng, Z, proton_radius, min_dist=min_dist) if Z else np.empty((0, 3))
-    neutron_positions = _sample_hard_sphere(rng, N, neutron_radius, min_dist=min_dist) if N else np.empty((0, 3))
+    sampler = _sample_hard_sphere
+    sampler_kwargs = {}
+    if (Z, A) == (92, 238):
+        sampler = _sample_deformed_hard_sphere
+        sampler_kwargs = {"beta2": _U238_DEFORMATION[0], "beta4": _U238_DEFORMATION[1]}
+    proton_positions = sampler(rng, Z, proton_radius, min_dist=min_dist, **sampler_kwargs) if Z else np.empty((0, 3))
+    neutron_positions = sampler(rng, N, neutron_radius, min_dist=min_dist, **sampler_kwargs) if N else np.empty((0, 3))
     positions = np.vstack((proton_positions, neutron_positions))
     is_proton = np.array([True] * Z + [False] * N, dtype=bool)
     order = rng.permutation(A)
